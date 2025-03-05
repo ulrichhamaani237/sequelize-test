@@ -1,0 +1,12 @@
+const express = require('express')
+const cors = require('cors'); // Importer CORS
+
+const http = require('http');
+const { log } = require('npmlog');
+const app = express();
+const server = http.createServer(app);
+
+
+app.listen(5000, ()=>{
+    log
+})
