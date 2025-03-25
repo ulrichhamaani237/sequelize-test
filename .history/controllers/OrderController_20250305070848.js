@@ -14,18 +14,6 @@ const createOder = async (req, res) =>{
     } 
 }
 
-const getAllUsers = async (req,res) =>{
-    try {
-
-        const users = await User.findAll();
-        res.status(200).json(users)
-        
-    } catch (error) {
-        res.status(500).json({message: "erreur de recuperation des users"})
-        
-    }
-}
-
 const getUserOrdes = async (req, res) =>{
     try {
         const userId = req.params.userId
@@ -42,6 +30,5 @@ const getUserOrdes = async (req, res) =>{
 
 module.exports = {
     createOder,
-    getUserOrdes,
-    getAllUsers
+    getUserOrdes
 }
