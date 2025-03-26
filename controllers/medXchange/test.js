@@ -1,6 +1,8 @@
 require('dotenv').config();
 const { query } = require('../../config/db');
 const bcrypt = require('bcrypt');
+const xlsx = require('xlsx');
+const upload = require('../../uploads/uploadProfess');
 
 
 const getdossier = async (req, res) => {
@@ -10,7 +12,7 @@ const getdossier = async (req, res) => {
     } catch (error) {
         res.status(400).json(error);
     }
-}
+} 
 
 const getAuthorisezeHopital = async (req, res) => {
     const { nom_hopital, nom_patient, date_naissance, nom_tuteur } = req.body;
@@ -36,8 +38,8 @@ const getAuthorisezeHopital = async (req, res) => {
         const hopital = hopitalResult.rows[0];
 
         // 2. Générer la clé d'accès à comparer
-        const donneesClef = `${nom_patient}${date_naissance}${nom_tuteur}`.replace(/\s/g, '');
-        
+        const donneesClef =  nom_patient + date_naissance + nom_tuteur;
+        const donneesClefInitiale = donneesClef.replace(/\s/g, '');
         // 3. Trouver le dossier médical avec comparaison de clé
         const dossierResult = await query(
             `SELECT d.* 
@@ -56,9 +58,8 @@ const getAuthorisezeHopital = async (req, res) => {
         const dossier = dossierResult.rows[0];
 
         // 4. Vérifier la clé d'accès
-        const cleValide = await bcrypt.compare(donneesClef, dossier.cle_acces_dossier);
-        
-        if (!cleValide) {
+        const cleValide = await bcrypt.compare(donneesClefInitiale, dossier.cle_acces_dossier);
+        if (cleValide) {
             return res.status(403).json({ error: "Accès refusé: clé d'accès invalide" });
         }
 
@@ -120,7 +121,8 @@ const InsererPatientDossier = async (req, res) => {
 
     try {
         // Génération de la clé d'accès
-        const donneesClefInitiale = `${nom}${date_naissance}${nom_tuteur}`.replace(/\s/g, '');
+        const donneesClefInitiale = nom + date_naissance + nom_tuteur;
+        donneesClefInitiale.replace(/\s/g, '');
         const cle_acces_dossier = await bcrypt.hash(donneesClefInitiale, 10);
 
         // Insertion du patient
@@ -157,9 +159,403 @@ const InsererPatientDossier = async (req, res) => {
     }
 };
 
+const importDossierMedicaleFromExcel = async (req, res) => {
+   
+    if (!req.file) {
+        console.log('Aucun fichier sélectionné');
+        return res.status(400).json({ message: "Aucun fichier sélectionné" });
+      }
+
+      const filePath = req.file.path; // Chemin du fichier uploadé
+      console.log('Chemin du fichier:', filePath);
+
+       // Récupération des données dans le fichier Excel
+          const workbook = xlsx.readFile(filePath);
+          const sheetName = workbook.SheetNames[0]; // Récupérer le nom de la première feuille
+          const sheet = workbook.Sheets[sheetName]; // Récupérer la feuille
+       // Convertir la feuille en JSON
+          const jsonData = xlsx.utils.sheet_to_json(sheet);
+          console.log('Données JSON:', jsonData);
+
+          // Enregistrer les données dans la base de données
+              for (const row of jsonData) {
+                await InsererPatientDossier(row);
+              }
+
+            console.log('Fichier importé avec succès');
+            res.status(200).json({ message: 'Fichier importé avec succès', data: jsonData });
+};
+
+const createPersonnelHopital = async (req, res) => {
+    const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
+
+    // Validation des champs obligatoires
+    if (!nom || !prenom || !email || !mot_de_passe || !id_hopital || !role || !autre_donnees) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+        // Vérifier si l'hôpital existe
+        const hopitalResult = await query(
+            'SELECT * FROM hopital WHERE id_hopital = $1',
+            [id_hopital]
+        );
+
+        if (hopitalResult.rows.length === 0) {
+            return res.status(404).json({ error: "Hôpital non trouvé" });
+        }
+
+        // Générer le hash du mot de passe
+        const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
+
+        // Insertion du personnel
+        const result = await query(
+            'INSERT INTO utilisateur(nom, prenom, email, mot_de_passe, role, id_hopital,autre_donnees) VALUES($1, $2, $3, $4, $5) RETURNING *',
+            [nom, prenom, email, motDePasseHash, role, id_hopital,autre_donnees]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion du personnel" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+    }
+    
+}
+
+const createHopital = async (req, res) => {
+
+    const { nom, adresse, type_hopitale, autres_donnees } = req.body;
+
+    // Validation des champs obligatoires
+    if (!nom || !adresse || !telephone || !email || !autres_donnees) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+        // Insertion de l'hôpital
+        const result = await query(
+            'INSERT INTO hopital(nom, adresse, telephone, email, autres_donnees) VALUES($1, $2, $3, $4, $5) RETURNING *',
+            [nom, adresse, telephone, email, autres_donnees]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'hôpital" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    }
+    catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+    }
+}
+
+const AjouterTraitement = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_traitement, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_traitement || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO traitement(id_dossier,id_utilisateur,date_traitement,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_traitement, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion du traitement" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterConsultation = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_consultation, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_consultation || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO consultation(id_dossier,id_utilisateur,date_consultation,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_consultation, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de la consultation" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterDiagnostic = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_diagnostic, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_diagnostic || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO diagnostic(id_dossier,id_utilisateur,date_diagnostic,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_diagnostic, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion du diagnostic" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterOrdonnance = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_ordonnance, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_ordonnance || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO ordonnance(id_dossier,id_utilisateur,date_ordonnance,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_ordonnance, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'ordonnance" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterResultat = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_resultat, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_resultat || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO resultat(id_dossier,id_utilisateur,date_resultat,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_resultat, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion du resultat" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterHospitalisation = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_hospitalisation, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_hospitalisation || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO hospitalisation(id_dossier,id_utilisateur,date_hospitalisation,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_hospitalisation, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'hospitalisation" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterExamen = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_examen, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_examen || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO examen(id_dossier,id_utilisateur,date_examen,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_examen, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'examen" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const AjouterVaccin = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_vaccin, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_vaccin || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO vaccin(id_dossier,id_utilisateur,date_vaccin,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_vaccin, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion du vaccin" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+
+
+const impoterProffessionnelToExcel = async (req, res) => {
+    try {
+        // Vérifier si le fichier a été récupéré
+        if (!req.file) {
+          console.log('Aucun fichier sélectionné');
+          return res.status(400).json({ message: "Aucun fichier sélectionné" });
+        }
+    
+        const filePath = req.file.path; // Chemin du fichier uploadé
+        console.log('Chemin du fichier:', filePath);
+    
+        // Récupération des données dans le fichier Excel
+        const workbook = xlsx.readFile(filePath);
+        const sheetName = workbook.SheetNames[0]; // Récupérer le nom de la première feuille
+        const sheet = workbook.Sheets[sheetName]; // Récupérer la feuille
+    
+        // Convertir la feuille en JSON
+        const jsonData = xlsx.utils.sheet_to_json(sheet);
+        console.log('Données JSON:', jsonData);
+    
+        // Enregistrer les données dans la base de données
+        for (const row of jsonData) {
+        }
+    
+        console.log('Fichier importé avec succès');
+        res.status(200).json({ message: 'Fichier importé avec succès', data: jsonData });
+      } catch (error) {
+        console.error('Erreur lors de l\'importation du fichier:', error);
+        res.status(500).json({ message: error.message });
+      }
+}
+
 
 module.exports = {
     getdossier,
     getAuthorisezeHopital,
-    InsererPatientDossier
+    InsererPatientDossier,
+    importDossierMedicaleFromExcel
 }
