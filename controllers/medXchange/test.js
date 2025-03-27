@@ -3,6 +3,140 @@ const { query } = require('../../config/db');
 const bcrypt = require('bcrypt');
 const xlsx = require('xlsx');
 const upload = require('../../uploads/uploadProfess');
+const {envoyerNotificationUtilisateur} = require('../../controllers/medXchange/notification')
+const jwt = require('jsonwebtoken');
+
+const registerUtilisateur = async (req, res) => {
+    const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
+    
+    // Validation des champs
+    if (!nom || !prenom || !email || !mot_de_passe || !role || !id_hopital || !autre_donnees) {
+        return res.status(400).json({ error: "Tous les champs obligatoires sont requis" });
+    }
+
+    try {
+        // Hachage du mot de passe
+        const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
+
+        // Génération du token initial
+        const token = jwt.sign({ id_utilisateur: null }, process.env.TOKEN_KEY, { expiresIn: '1h' });
+
+        // Requête SQL corrigée (vérifiez que les noms de colonnes correspondent à votre schéma de base)
+        const sql = `
+            INSERT INTO utilisateur(
+                nom, 
+                prenom, 
+                email, 
+                mot_de_passe_hash,  
+                role, 
+                id_hopital, 
+                autre_donnees,
+                token
+            ) VALUES($1, $2, $3, $4, $5, $6, $7, $8) 
+            RETURNING id_utilisateur, nom, email, role, token
+        `;
+
+        // Utilisation correcte de db.query (assurez-vous que db est bien importé/configuré)
+        const { rows } = await query(sql, [
+            nom, 
+            prenom, 
+            email, 
+            motDePasseHash, 
+            role, 
+            id_hopital, 
+            autre_donnees || null, // Gestion de la valeur NULL si autre_donnees est vide
+            token
+        ]);
+
+        if (rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'utilisateur" });
+        }
+
+        const newUser = rows[0];
+
+        // Mise à jour du token avec le vrai userId
+        const updatedToken = jwt.sign(
+            { id_utilisateur: newUser.id_utilisateur },
+            process.env.TOKEN_KEY,
+            { expiresIn: '1h' }
+        );
+
+        await query(
+            'UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2',
+            [updatedToken, newUser.id_utilisateur]
+        );
+
+        res.status(201).json({
+            id: newUser.id_utilisateur,
+            nom: newUser.nom,
+            prenom: newUser.prenom,
+            email: newUser.email,
+            role: newUser.role,
+            token: updatedToken
+        });
+
+    } catch (error) {
+        console.error("Erreur lors de l'inscription:", error);
+        
+        // Gestion spécifique des erreurs PostgreSQL
+        if (error.code === '42703') { // Erreur de colonne inexistante
+            return res.status(500).json({ 
+                error: "Erreur de configuration de la base de données",
+                details: "Une colonne spécifiée n'existe pas dans la table"
+            });
+        } else if (error.code === '23505') { // Violation de contrainte unique (email déjà existant)
+            return res.status(409).json({ 
+                error: "Cet email est déjà utilisé" 
+            });
+        }
+
+        res.status(500).json({ 
+            error: "Erreur serveur",
+            details: error.message 
+        });
+    }
+};
+
+const LoginUtilisateur = async (req, res) =>{
+    try {
+        
+   
+    const {email, password} = req.body
+
+    if(!email || !password){
+        res.status(201).json({error: "Tous les champs sont requis"})
+    }
+
+    const sql = 'SELECT * FROM utilisateur WHERE email =$1 '
+    const {rows: users} = await query(sql,[email])
+    if(users.length === 0){
+        return res.status(404).json({error: "Utilisateur non trouvé"})
+    }
+    const user = users[0]
+    const motDePasseValide = await bcrypt.compare(password, user.mot_de_passe_hash)
+    if(!motDePasseValide){
+        res.status(401).json({message: "mots de pass invalde!"})
+    }else{
+        res.json({message: 'vous ete bien connecté merci'})
+    }
+
+    // generer un nouveau token
+    const token = jwt.sign({id_utilisateur: user.id_utilisateur}, process.env.TOKEN_KEY, {expiresIn: '1h'})
+
+    // metre a jour le token dans la BD
+    await query('UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2', [token, user.id_utilisateur])
+
+    res.status(200).json({
+        id: user.id_utilisateur,
+        username: user.nom,
+        email: user.email,
+        token
+      });
+
+} catch (error) {
+        
+}
+}
 
 
 const getdossier = async (req, res) => {
@@ -281,7 +415,11 @@ const AjouterTraitement = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(500).json({ error: "Échec de l'insertion du traitement" });
         }
-
+       
+        await envoyerNotificationUtilisateur(
+            id_utilisateur, 
+            `Nouvelle consultation ajoutée au dossier ${id_dossier}`
+        );
         return res.status(201).json(result.rows[0]);
 
     } catch (error) {
@@ -310,9 +448,34 @@ const AjouterConsultation = async (req, res) => {
             [id_dossier, id_utilisateur, date_consultation, detail]
         );
 
+        const resultatSelect = await query(
+            'SELECT * FROM utilisateur WHERE id_utilisateur = $1',
+            [id_utilisateur]
+        )
+
+        if (resultatSelect.rows.length === 0) {
+            return res.status(404).json({ error: "Utilisateur non trouvé" });
+        }
+
+
+
         if (result.rows.length === 0) {
             return res.status(500).json({ error: "Échec de l'insertion de la consultation" });
         }
+
+        // Notification
+        await client.query(
+            `SELECT pg_notify(
+                'nouvelle_consultation', 
+                json_build_object(
+                    'event', 'insert',
+                    'table', 'consultation',
+                    'data', $1,
+                    'utilisateur', $2,
+                )::text
+            )`,
+            [result.rows[0], resultatSelect.rows[0]]
+        );
 
         return res.status(201).json(result.rows[0]);
 
@@ -345,6 +508,8 @@ const AjouterDiagnostic = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(500).json({ error: "Échec de l'insertion du diagnostic" });
         }
+
+
 
         return res.status(201).json(result.rows[0]);
 
@@ -518,6 +683,71 @@ const AjouterVaccin = async (req, res) => {
     }
 }
 
+const AjouterAllergie = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_allergie, detail } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_allergie || !detail) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO allergie(id_dossier,id_utilisateur,date_allergie,detail) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_allergie, detail]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'allergie" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+const IsertHistorique_acces_dossier = async (req, res) => {
+    const { id_dossier, id_utilisateur, date_acces, type_action } = req.body;
+
+    // Validation des champs obligatoires
+    if (!id_dossier  || id_utilisateur || !date_acces || !type_action) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+       
+        // Insertion du traitement
+        const result = await query(
+            'INSERT INTO historique_acces_dossier(id_dossier,id_utilisateur,date_acces,type_action) VALUES($1, $2, $3,$4) RETURNING *',
+            [id_dossier, id_utilisateur, date_acces, type_action]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'historique d'accès" });
+        }
+
+        return res.status(201).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Erreur SQL:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+
+    }
+}
+
+
 
 
 const impoterProffessionnelToExcel = async (req, res) => {
@@ -542,6 +772,7 @@ const impoterProffessionnelToExcel = async (req, res) => {
     
         // Enregistrer les données dans la base de données
         for (const row of jsonData) {
+            await createPersonnelHopital(row);
         }
     
         console.log('Fichier importé avec succès');
@@ -557,5 +788,17 @@ module.exports = {
     getdossier,
     getAuthorisezeHopital,
     InsererPatientDossier,
-    importDossierMedicaleFromExcel
+    importDossierMedicaleFromExcel,
+    createPersonnelHopital,
+    createHopital,
+    AjouterTraitement,
+    AjouterConsultation,
+    AjouterDiagnostic,
+    AjouterOrdonnance,
+    AjouterResultat,
+    AjouterHospitalisation,
+    AjouterExamen,
+    impoterProffessionnelToExcel,
+    registerUtilisateur,
+    LoginUtilisateur
 }
