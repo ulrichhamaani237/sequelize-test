@@ -10,6 +10,7 @@ const cineRoute = require('./routes/api/CineRoutes');
 const patientRoutes = require('./routes/api/PatientRoutes');
 const ProfessionnelSanteRoutes = require('./routes/api/ProfessionnelSanteRoutes');
 const medXchangeRoute = require('./routes/api/medXchangeRoute');
+
 // const {query} = require('./config/db');
 
 // Dans la console Node.js
