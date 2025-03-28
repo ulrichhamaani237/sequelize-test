@@ -19,7 +19,7 @@ const registerUtilisateur = async (req, res) => {
         const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
 
         // Génération du token initial
-        const token = jwt.sign({ id_utilisateur: null }, process.env.TOKEN_KEY, { expiresIn: '1h' });
+        const token = jwt.sign({ id_utilisateur: null }, process.env.TOKEN_KEY, { expiresIn: '10d' });
 
         // Requête SQL corrigée (vérifiez que les noms de colonnes correspondent à votre schéma de base)
         const sql = `
@@ -99,8 +99,6 @@ const registerUtilisateur = async (req, res) => {
 
 const LoginUtilisateur = async (req, res) =>{
     try {
-        
-   
     const {email, password} = req.body
 
     if(!email || !password){
@@ -116,12 +114,10 @@ const LoginUtilisateur = async (req, res) =>{
     const motDePasseValide = await bcrypt.compare(password, user.mot_de_passe_hash)
     if(!motDePasseValide){
         res.status(401).json({message: "mots de pass invalde!"})
-    }else{
-        res.json({message: 'vous ete bien connecté merci'})
     }
 
     // generer un nouveau token
-    const token = jwt.sign({id_utilisateur: user.id_utilisateur}, process.env.TOKEN_KEY, {expiresIn: '1h'})
+    const token = jwt.sign({id_utilisateur: user.id_utilisateur}, process.env.TOKEN_KEY, {expiresIn: '10d'})
 
     // metre a jour le token dans la BD
     await query('UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2', [token, user.id_utilisateur])
@@ -137,6 +133,22 @@ const LoginUtilisateur = async (req, res) =>{
         
 }
 }
+
+// Déconnexion
+ const logout = async (req, res) => {
+    try {
+
+      await query(
+        'UPDATE utilisateur SET token = NULL WHERE id_utilisateur = $1',
+        [req.user.id_utilisateur]
+      );
+
+      res.json({ message: "Déconnexion réussie" });
+    } catch (error) {
+      console.error('Erreur lors de la déconnexion:', error);
+      res.status(500).json({ message: "Erreur serveur" });
+    }
+  };
 
 
 const getdossier = async (req, res) => {
@@ -800,5 +812,6 @@ module.exports = {
     AjouterExamen,
     impoterProffessionnelToExcel,
     registerUtilisateur,
-    LoginUtilisateur
+    LoginUtilisateur,
+    logout
 }
