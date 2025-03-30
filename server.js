@@ -13,6 +13,8 @@ const medXchangeRoute = require('./routes/api/medXchangeRoute');
 
 // const {query} = require('./config/db');
 
+
+
 // Dans la console Node.js
 const bcrypt = require('bcrypt');
 const testKey = "homar_homar_2000-07-06";

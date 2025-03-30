@@ -23,6 +23,8 @@ const protectionRoute = async (req, res, next) => {
         }
 
         req.user = rows[0];
+         // Après avoir vérifié l'authentification
+        
         next();
     } catch (error) { // Corrigez 'err' en 'error'
         console.error('Erreur de vérification du token:', error);
