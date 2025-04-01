@@ -2,10 +2,63 @@ require('dotenv').config();
 const { query } = require('../../config/db');
 const bcrypt = require('bcrypt');
 const xlsx = require('xlsx');
+const crypto = require('crypto');
 const upload = require('../../uploads/uploadProfess');
 const { envoyerNotificationUtilisateur } = require('../../controllers/medXchange/notification')
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const { genererCleAccesUnifiee } = require('../../helpers/generateKey')
 
+const getAllDataTables = async (req, res) => {
+    const { table, id_hopital } = req.body;
+
+    // Validation des entrées
+    if (!table || !id_hopital) {
+        return res.status(400).json({
+            success: false,
+            message: 'Le nom de la table et l\'ID de l\'hôpital sont requis'
+        });
+    }
+
+    // Liste blanche des tables autorisées
+    const allowedTables = ['patient', 'utilisateur'];
+    if (!allowedTables.includes(table)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Accès non autorisé à cette table'
+        });
+    }
+
+    try {
+        // Utilisation de paramètres nommés pour plus de sécurité
+        const sql = `SELECT * FROM ${table} WHERE id_hopital = $1`;
+        const response = await query(sql, [id_hopital]);
+
+        if (response.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Aucun enregistrement trouvé'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Enregistrements trouvés',
+            count: response.rows.length,
+            donnees: response.rows
+        });
+
+    } catch (error) {
+        console.error('Erreur dans getAllTables:', error.message);
+
+
+
+        return res.status(500).json({
+            success: false,
+            message: errorMessage
+        });
+    }
+};
 
 const registerUtilisateur = async (req, res) => {
     const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
@@ -33,7 +86,7 @@ const registerUtilisateur = async (req, res) => {
             RETURNING id_utilisateur, nom, email, role, token
         `;
 
-      
+
 
         // Utilisation correcte de db.query (assurez-vous que db est bien importé/configuré)
         const { rows } = await query(sql, [
@@ -52,8 +105,8 @@ const registerUtilisateur = async (req, res) => {
 
         const newUser = rows[0];
 
-         // MAINTENANT générer le token valide
-         const token = jwt.sign(
+        // MAINTENANT générer le token valide
+        const token = jwt.sign(
             {
                 id_utilisateur: newUser.id_utilisateur,
                 email: newUser.email,
@@ -74,9 +127,10 @@ const registerUtilisateur = async (req, res) => {
             success: true,
             user: {
                 ...newUser,
-                token: token 
+                token: token
             },
-            token: token         });
+            token: token
+        });
 
     } catch (error) {
         console.error("Erreur lors de l'inscription:", error);
@@ -88,7 +142,7 @@ const registerUtilisateur = async (req, res) => {
                 details: "Une colonne spécifiée n'existe pas dans la table",
                 success: false
             });
-        } else if (error.code === '23505'){ // Violation de contrainte unique (email déjà existant)
+        } else if (error.code === '23505') { // Violation de contrainte unique (email déjà existant)
             return res.status(409).json({
                 error: "cette Email existe deja",
                 details: "Une colonne spécifiée n'existe pas dans la table",
@@ -104,22 +158,22 @@ const registerUtilisateur = async (req, res) => {
     }
 };
 
-const refreshToken = async (req, res) =>{
-    const {token, id_user} = req.body
-  
+const refreshToken = async (req, res) => {
+    const { token, id_user } = req.body
+
     try {
         if (!token || !id_user) {
-            return res.status(400).json({message: "information  requise"})
+            return res.status(400).json({ message: "information  requise" })
         }
-    
+
         const sql = 'UPDATE utilisateur SET token =$1 WHERE id_utilisateur = $2'
-    
-       await query(sql,[token,id_user])
-      
-       return res.status(200).json({message: "token modifie"})
-   } catch (err) {
-    return res.status(400).json({error: err})
-   }
+
+        await query(sql, [token, id_user])
+
+        return res.status(200).json({ message: "token modifie" })
+    } catch (err) {
+        return res.status(400).json({ error: err })
+    }
 
 }
 
@@ -284,57 +338,88 @@ const getdossier = async (req, res) => {
         res.status(400).json(error);
     }
 }
-
 const getAuthorisezeHopital = async (req, res) => {
-    const { nom_hopital, nom_patient, date_naissance, nom_tuteur } = req.body;
-
+    const { id_hopitale, nom_patient, nom_tuteur } = req.body;
+    const parseDate = (dateString) => {
+        const parsedDate = new Date(dateString);
+        return isNaN(parsedDate.getTime()) ? null : parsedDate;
+    };
     // Validation des champs requis
-    if (!nom_hopital || !nom_patient || !date_naissance || !nom_tuteur) {
-        return res.status(400).json({ error: "Tous les champs sont requis" });
+    if (!id_hopitale || !nom_patient || !nom_tuteur) {
+        return res.status(400).json({
+            success: false,
+            message: "Tous les champs sont requis (id_hopitale, nom_patient, nom_tuteur)"
+        });
     }
 
-
     try {
-
-        // 1. Récupérer l'hôpital
+        // 1. Vérification de l'existence de l'hôpital
         const hopitalResult = await query(
-            'SELECT id_hopital FROM hopital WHERE nom = $1',
-            [nom_hopital]
+            'SELECT id_hopital, nom FROM hopital WHERE id_hopital = $1',
+            [id_hopitale]
         );
 
         if (hopitalResult.rows.length === 0) {
-            return res.status(404).json({ error: "Hôpital non trouvé" });
+            return res.status(404).json({
+                success: false,
+                message: "Hôpital non trouvé"
+            });
         }
 
         const hopital = hopitalResult.rows[0];
 
-        // 2. Générer la clé d'accès à comparer
-        const donneesClef = nom_patient + date_naissance + nom_tuteur;
-        const donneesClefInitiale = donneesClef.replace(/\s/g, '');
-        // 3. Trouver le dossier médical avec comparaison de clé
-        const dossierResult = await query(
-            `SELECT d.* 
-             FROM dossier_medical_global d
-             JOIN patient p ON d.id_patient = p.id_patient
-             WHERE p.nom = $1 
-             AND p.date_naissance = $2
-             AND p.nom_tuteur = $3`,
-            [nom_patient, date_naissance, nom_tuteur]
+        // 2. Recherche du patient avec vérification du tuteur
+        const patientResult = await query(
+            `SELECT p.id_patient, p.nom, p.date_naissance, p.nom_tuteur, 
+                    d.id_dossier, d.cle_acces_dossier, d.date_creation
+             FROM patient p
+             JOIN dossier_medical_global d ON p.id_patient = d.id_patient
+             WHERE p.nom = $1 AND p.nom_tuteur = $2`,
+            [nom_patient.trim(), nom_tuteur.trim()]
         );
 
-        if (dossierResult.rows.length === 0) {
-            return res.status(404).json({ error: "Dossier médical non trouvé" });
+        if (patientResult.rows.length == 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Aucun dossier médical trouvé pour ce patient/tuteur"
+            });
         }
 
-        const dossier = dossierResult.rows[0];
+        const dossier = patientResult.rows[0];
 
-        // 4. Vérifier la clé d'accès
-        const cleValide = await bcrypt.compare(donneesClefInitiale, dossier.cle_acces_dossier);
-        if (cleValide) {
-            return res.status(403).json({ error: "Accès refusé: clé d'accès invalide" });
+        // // 3. Génération et validation de la clé d'accès
+        // const clefGenere = genererCleAccesUnifiee({
+        //     nom: dossier.nom,
+        //     date_naissance: parseDate(dossier.date_naissance),
+        //     nom_tuteur: dossier.nom_tuteur
+        // });
+            
+        // if (clefGenere !== dossier.cle_acces_dossier) {
+        //     return res.status(403).json({
+        //         success: false,
+        //         message: "Clé d'accès invalide - Autorisation refusée",
+        //         clef: clefGenere,
+        //         dossierclef:dossier.cle_acces_dossier,
+        //         dossier: dossier,
+        //         date: parseDate(dossier.date_naissance)
+        //     }); 
+        // }
+
+        // 4. Vérification des droits existants pour éviter les doublons
+        const existingAccess = await query(
+            `SELECT id FROM acces_autorise_par_cle_patient 
+             WHERE id_patient = $1 AND id_hopital_autorise = $2`,
+            [dossier.id_patient, id_hopitale]
+        );
+
+        if (existingAccess.rows.length > 0) {
+            return res.status(409).json({
+                success: false,
+                message: "Cet hôpital a déjà accès à ce dossier"
+            });
         }
 
-        // 5. Enregistrer l'accès autorisé
+        // 5. Enregistrement de l'autorisation
         const accesResult = await query(
             `INSERT INTO acces_autorise_par_cle_patient(
                 id_patient, 
@@ -342,46 +427,54 @@ const getAuthorisezeHopital = async (req, res) => {
                 date_autorisation, 
                 id_dossier_autorise
              ) VALUES($1, $2, $3, $4) RETURNING *`,
-            [dossier.id_patient, hopital.id_hopital, new Date(), dossier.id_dossier]
+            [dossier.id_patient, id_hopitale, new Date(), dossier.id_dossier]
         );
 
-
-        // 6. Récupérer les informations complètes à retourner
-        const result = {
+        // 6. Construction de la réponse
+        const responseData = {
             hopital: {
                 id: hopital.id_hopital,
-                nom: nom_hopital
+                nom: hopital.nom
             },
             patient: {
                 id: dossier.id_patient,
-                nom: nom_patient
+                nom: dossier.nom,
+                tuteur: dossier.nom_tuteur
             },
             dossier: {
                 id: dossier.id_dossier,
-                date_creation: dossier.date_creation
+                date_creation: dossier.date_creation,
+                dossier: dossier
+
+
             },
             autorisation: accesResult.rows[0]
         };
 
-        return res.status(200).json(result);
+        return res.status(200).json({
+            success: true,
+            message: "Accès autorisé avec succès",
+            data: responseData
+        });
 
     } catch (error) {
-        console.error("Erreur:", error);
-
-        if (error.code === '23505') { // Violation de contrainte unique
+        console.error("Erreur serveur:", error);
+        
+        // Gestion spécifique des erreurs de base de données
+        if (error.code === '23505') {
             return res.status(409).json({
-                error: "Cet hôpital a déjà accès à ce dossier"
+                success: false,
+                message: "Conflit: Cet hôpital a déjà accès à ce dossier"
             });
         }
 
         return res.status(500).json({
-            error: "Erreur serveur",
-            details: error.message
+            success: false,
+            message: "Erreur serveur",
+            error: error.message
         });
-    } finally {
     }
 };
-
 const InsererPatientDossier = async (req, res) => {
     const { nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, donnee_dossier, code } = req.body;
 
@@ -430,32 +523,241 @@ const InsererPatientDossier = async (req, res) => {
     }
 };
 
+
+
+// Fonction pour générer un code unique (version améliorée)
+const genererCodePatient = () => {
+    const caracteres = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 8; i++) {
+        code += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
+    }
+    return code;
+};
+
+const createNewPatient = async (req, res) => {
+    const { nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, sexe, taille, age } = req.body;
+
+    // Validation des champs obligatoires
+    if (!nom || !prenom || !date_naissance || !id_hopital) {
+        return res.status(400).json({
+            success: false,
+            message: 'Nom, prénom, date de naissance et ID hopital sont obligatoires'
+        });
+    }
+
+    try {
+        // Génération du code patient unique
+        let codeUnique;
+        let codeExists;
+        do {
+            codeUnique = genererCodePatient();
+            const checkCode = await query(
+                'SELECT 1 FROM patient WHERE code = $1',
+                [codeUnique]
+            );
+            codeExists = checkCode.rows.length > 0;
+        } while (codeExists);
+
+        // Insertion du patient
+        const patientQuery = `
+        INSERT INTO patient (
+          nom, prenom, date_naissance, nom_tuteur, 
+          id_hopital, adresse, donnees, code, sexe, taille, age
+        ) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING *
+      `;
+
+        const patientParams = [
+            nom,
+            prenom,
+            new Date(date_naissance),
+            nom_tuteur || null,
+            id_hopital,
+            adresse || null,
+            donnees || null, // Valeur par défaut si donnees est undefined
+            codeUnique,
+            sexe || 'Non spécifié',
+            taille ? parseFloat(taille) : null,
+            age ? parseInt(age) : null
+        ];
+
+        const patientResult = await query(patientQuery, patientParams);
+
+        // Vérification que le résultat contient des données
+        if (!patientResult?.rows?.[0]) {
+            throw new Error('Aucune donnée retournée après insertion');
+        }
+
+        res.status(201).json({
+            success: true,
+            message: 'Patient créé avec succès',
+            patient: patientResult.rows[0] // Retourne toutes les colonnes demandées dans RETURNING
+        });
+
+    } catch (error) {
+        console.error('Erreur création patient:', error);
+
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la création du patient',
+            error: error.message,
+        });
+    }
+};
+
 const importDossierMedicaleFromExcel = async (req, res) => {
+    const { id_hopital } = req.body;
+
+    if (!id_hopital) {
+        return res.status(400).json({
+            success: false,
+            message: "L'ID de l'hôpital est requis"
+        });
+    }
 
     if (!req.file) {
-        console.log('Aucun fichier sélectionné');
-        return res.status(400).json({ message: "Aucun fichier sélectionné" });
+        return res.status(400).json({
+            success: false,
+            message: "Aucun fichier sélectionné"
+        });
     }
 
-    const filePath = req.file.path; // Chemin du fichier uploadé
-    console.log('Chemin du fichier:', filePath);
+    const filePath = req.file.path;
 
-    // Récupération des données dans le fichier Excel
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0]; // Récupérer le nom de la première feuille
-    const sheet = workbook.Sheets[sheetName]; // Récupérer la feuille
-    // Convertir la feuille en JSON
-    const jsonData = xlsx.utils.sheet_to_json(sheet);
-    console.log('Données JSON:', jsonData);
+    try {
+        const workbook = xlsx.readFile(filePath);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const jsonData = xlsx.utils.sheet_to_json(sheet);
 
-    // Enregistrer les données dans la base de données
-    for (const row of jsonData) {
-       
+        if (!jsonData || jsonData.length === 0) {
+            fs.unlinkSync(filePath);
+            return res.status(400).json({ message: "Le fichier est vide ou mal formaté" });
+        }
+
+        const patientFields = ['nom', 'prenom', 'date_naissance', 'nom_tuteur', 'adresse', 'sexe', 'taille', 'age'];
+        const patientsData = [];
+        const dossiersMedicauxData = [];
+
+        function genererCodeUnique() {
+            return Math.random().toString(36).substring(2, 10).toUpperCase();
+        }
+
+        const parseDate = (dateString) => {
+            const parsedDate = new Date(dateString);
+            return isNaN(parsedDate.getTime()) ? null : parsedDate;
+        };
+
+        for (const row of jsonData) {
+            const codePatient = genererCodeUnique();
+
+            const patient = {
+                nom: row.nom || '',
+                prenom: row.prenom || '',
+                date_naissance: parseDate(row.date_naissance),
+                nom_tuteur: row.nom_tuteur || null,
+                id_hopital: id_hopital,
+                adresse: row.adresse || null,
+                code: codePatient,
+                sexe: row.sexe || 'Non spécifié',
+                taille: row.taille ? parseFloat(row.taille) : null,
+                age: row.age ? parseInt(row.age) : null
+            };
+            const clefAccess = genererCleAccesUnifiee({
+                nom: String(row.nom).trim(),
+                date_naissance: parseDate(row.date_naissance),
+                nom_tuteur: String(row.nom_tuteur).trim()
+            })
+            const dossierMedical = {
+                id_hopital: id_hopital,
+                date_creation: new Date(),
+                cle_acces_dossier: clefAccess
+            };
+
+            for (const [key, value] of Object.entries(row)) {
+                if (!patientFields.includes(key.toLowerCase()) && key !== 'id_hopital') {
+                    dossierMedical[key] = value !== undefined ? String(value).trim() : null;
+                }
+            }
+
+            patientsData.push(patient);
+            dossiersMedicauxData.push(dossierMedical);
+        }
+
+        for (let i = 0; i < patientsData.length; i++) {
+            const patient = patientsData[i];
+            const dossierMedical = dossiersMedicauxData[i];
+
+            // Modification ici: Utilisez directement query au lieu de createNewPatient
+            const patientQuery = `
+                INSERT INTO patient (
+                    nom, prenom, date_naissance, nom_tuteur, 
+                    id_hopital, adresse, code, sexe, taille, age
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING *
+            `;
+
+            const patientResult = await query(patientQuery, [
+                patient.nom,
+                patient.prenom,
+                patient.date_naissance,
+                patient.nom_tuteur,
+                patient.id_hopital,
+                patient.adresse,
+                patient.code,
+                patient.sexe,
+                patient.taille,
+                patient.age
+            ]);
+
+            if (!patientResult.rows[0]) {
+                throw new Error("Échec de l'insertion du patient");
+            }
+
+            await query(
+                `INSERT INTO dossier_medical_global (
+                    id_patient, id_hopital, donnees_medicales, 
+                    date_creation, derniere_modification, cle_acces_dossier
+                ) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+                [
+                    patientResult.rows[0].id_patient,
+                    id_hopital,
+                    JSON.stringify(dossierMedical),
+                    new Date(),
+                    new Date(),
+                    dossierMedical.cle_acces_dossier
+                ]
+            );
+        }
+
+        fs.unlinkSync(filePath);
+
+        res.status(200).json({
+            success: true,
+            message: 'Import terminé avec succès',
+            stats: { // Renommez 'imported' en 'stats' pour plus de clarté
+                patients: patientsData.length,
+                dossiers: dossiersMedicauxData.length
+            }
+        });
+
+    } catch (error) {
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+
+        res.status(500).json({
+            success: false,
+            message: "Échec de l'import",
+            error: error.message,
+        });
     }
-
-    console.log('Fichier importé avec succès');
-    res.status(200).json({ message: 'Fichier importé avec succès', data: jsonData });
 };
+
+
+
 
 const createPersonnelHopital = async (req, res) => {
     const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
@@ -896,43 +1198,193 @@ const IsertHistorique_acces_dossier = async (req, res) => {
 
 
 
-
 const impoterProffessionnelToExcel = async (req, res) => {
+    const { id_hopital } = req.body;
+
+    if (!id_hopital) {
+        return res.status(400).json({
+            success: false,
+            message: "L'ID de l'hôpital est requis"
+        });
+    }
+
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            message: "Aucun fichier sélectionné"
+        });
+    }
+
+    const filepath = req.file.path;
+
     try {
-        // Vérifier si le fichier a été récupéré
-        if (!req.file) {
-            console.log('Aucun fichier sélectionné');
-            return res.status(400).json({ message: "Aucun fichier sélectionné" });
-        }
-
-        const filePath = req.file.path; // Chemin du fichier uploadé
-        console.log('Chemin du fichier:', filePath);
-
-        // Récupération des données dans le fichier Excel
-        const workbook = xlsx.readFile(filePath);
-        const sheetName = workbook.SheetNames[0]; // Récupérer le nom de la première feuille
-        const sheet = workbook.Sheets[sheetName]; // Récupérer la feuille
-
-        // Convertir la feuille en JSON
+        // Lecture du fichier Excel
+        const workbook = xlsx.readFile(filepath);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
         const jsonData = xlsx.utils.sheet_to_json(sheet);
-        console.log('Données JSON:', jsonData);
 
-        // Enregistrer les données dans la base de données
-        for (const row of jsonData) {
-            await createPersonnelHopital(row);
+        if (!jsonData || jsonData.length === 0) {
+            fs.unlinkSync(filepath);
+            return res.status(400).json({
+                success: false,
+                message: 'Le fichier est vide ou mal formaté'
+            });
         }
 
-        console.log('Fichier importé avec succès');
-        res.status(200).json({ message: 'Fichier importé avec succès', data: jsonData });
+        const personnelfields = ["nom", "prenom", "email", "mot_de_passe_hash", "role", "adresse"];
+        const personnelData = [];
+
+        for (const row of jsonData) {
+            // Validation des champs obligatoires
+            if (!row.nom || !row.prenom || !row.email || !row.mot_de_passe_hash || !row.role) {
+                throw new Error(`Tous les champs obligatoires doivent être remplis pour ${row.nom || ''} ${row.prenom || ''}`);
+            }
+
+
+            const password_hash = bcrypt.hashSync(row.mot_de_passe_hash, 10);
+            const date_creation = new Date();
+
+            // Construction de l'objet autre_donnees avec tous les champs non-standard
+            const autre_donnees = {};
+            for (const [key, value] of Object.entries(row)) {
+                if (!personnelfields.includes(key.toLowerCase()) && key !== 'id_hopital') {
+                    autre_donnees[key] = value !== undefined ? value : null;
+                }
+            }
+
+            const personnel = {
+                nom: row.nom,
+                prenom: row.prenom,
+                email: row.email,
+                mot_de_passe_hash: password_hash,
+                role: row.role,
+                id_hopital: id_hopital,
+                autre_donnees: JSON.stringify(autre_donnees), // Conversion en JSON
+                adresse: row.adresse || null,
+                created_at: date_creation,
+                updated_at: date_creation
+            };
+
+            personnelData.push(personnel);
+        }
+
+        // Insertion des données
+        const insertedIds = [];
+        for (const personnel of personnelData) {
+            try {
+                const sql = `
+                    INSERT INTO utilisateur(
+                        nom, prenom, email,
+                        mot_de_passe_hash, role, id_hopital, autre_donnees,
+                        adresse, created_at, updated_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    RETURNING id_utilisateur
+                `;
+
+                const result = await query(sql, [
+                    personnel.nom,
+                    personnel.prenom,
+                    personnel.email,
+                    personnel.mot_de_passe_hash,
+                    personnel.role,
+                    personnel.id_hopital,
+                    personnel.autre_donnees,
+                    personnel.adresse,
+                    personnel.created_at,
+                    personnel.updated_at
+                ]);
+
+                if (!result.rows[0]) {
+                    throw new Error(`Échec de l'insertion pour ${personnel.nom} ${personnel.prenom}`);
+                }
+
+                const token = jwt.sign(
+                    {
+                        id_utilisateur: result.rows[0].id_utilisateur,
+                        email: personnel.email,
+                        role: personnel.role
+                    },
+                    process.env.TOKEN_KEY,
+                    { expiresIn: '30d' }
+                );
+
+                await query(
+                    `UPDATE utilisateur SET token = $1 
+                    WHERE id_utilisateur = $2`,
+                    [token, result.rows[0].id_utilisateur]
+                );
+
+                insertedIds.push(result.rows[0].id_utilisateur);
+            } catch (error) {
+                console.error(`Erreur lors de l'insertion de ${personnel.nom} ${personnel.prenom}:`, error);
+                // Continue avec les autres enregistrements même en cas d'erreur
+            }
+        }
+
+        if (insertedIds.length === 0) {
+            throw new Error("Aucun enregistrement n'a pu être inséré");
+        }
+
+        fs.unlinkSync(filepath);
+
+        res.status(200).json({
+            success: true,
+            message: 'Importation terminée avec succès',
+            stats: {
+                total: jsonData.length,
+                inserted: insertedIds.length,
+                failed: jsonData.length - insertedIds.length
+            },
+            insertedIds
+        });
+
     } catch (error) {
-        console.error('Erreur lors de l\'importation du fichier:', error);
-        res.status(500).json({ message: error.message });
+        if (fs.existsSync(filepath)) {
+            fs.unlinkSync(filepath);
+        }
+
+        console.error('Erreur lors de l\'importation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de l\'importation',
+            error: error.message,
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+};
+const getPatientsForshearch = async (req, res) => {
+    try {
+        const response = await query(`SELECT nom , prenom, date_naissance, nom_tuteur FROM patient`)
+
+        if (response.rows.length < 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Aucun patient trouvé'
+            })
+
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Patients trouvés',
+            donnees: response.rows
+        })
+
+    } catch (err) {
+        console.error('Erreur lors de la récupération des patients:', err)
+        return res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la récupération des patients',
+            error: err.message,
+        })
+
     }
 }
-
-
 module.exports = {
     getdossier,
+    getPatientsForshearch,
     getAuthorisezeHopital,
     InsererPatientDossier,
     importDossierMedicaleFromExcel,
@@ -950,5 +1402,7 @@ module.exports = {
     LoginUtilisateur,
     logout,
     getUserDetail,
-    refreshToken
+    refreshToken,
+    createNewPatient,
+    getAllDataTables
 }

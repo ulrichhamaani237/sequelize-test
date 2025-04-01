@@ -10,11 +10,20 @@ const cineRoute = require('./routes/api/CineRoutes');
 const patientRoutes = require('./routes/api/PatientRoutes');
 const ProfessionnelSanteRoutes = require('./routes/api/ProfessionnelSanteRoutes');
 const medXchangeRoute = require('./routes/api/medXchangeRoute');
+const crypto = require('crypto')
 
 // const {query} = require('./config/db');
 
 
 
+const texteEntrant = 'ulruch';
+const cleExistante = '1e28b39e8b81'; // Remplace par ta clé réelle
+
+const cleGeneree = crypto.createHash('sha256').update(texteEntrant).digest('hex').substring(0, 12);
+const estValide = cleGeneree === cleExistante;
+
+console.log('Clé générée :', cleGeneree);
+console.log('Clé valide ?', estValide); 
 // Dans la console Node.js
 const bcrypt = require('bcrypt');
 const testKey = "homar_homar_2000-07-06";
