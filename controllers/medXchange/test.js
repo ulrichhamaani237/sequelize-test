@@ -9,6 +9,42 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const { genererCleAccesUnifiee } = require('../../helpers/generateKey')
 
+
+
+const getPatientAutorizeHopitale = async (req, res) => {
+
+    try {
+        const { id_hopital } = req.body
+
+        const response = await query(`
+        SELECT p.*, h.nom as nomhopitale from patient p
+        INNER join acces_autorise_par_cle_patient a ON a.id_patient = p.id_patient
+        INNER JOIN hopital h ON h.id_hopital = a.id_hopital_autorise
+        WHERE h.id_hopital = $1
+        `, [id_hopital])
+
+        if (response.rows.length == 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Aucun patient autorisé pour cette hopital'
+            })
+        }
+
+        return res.status(200).json({
+            success: true,
+            donnees: response.rows
+        })
+
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la récupération des patients autorisés pour cette hopital'
+        });
+    }
+
+}
+
 const getAllDataTables = async (req, res) => {
     const { table, id_hopital } = req.body;
 
@@ -127,7 +163,6 @@ const registerUtilisateur = async (req, res) => {
             success: true,
             user: {
                 ...newUser,
-                token: token
             },
             token: token
         });
@@ -331,20 +366,47 @@ const getUserDetail = async (req, res) => {
 }
 
 const getdossier = async (req, res) => {
+    const { id_hopitale } = req.body;
     try {
-        const { rows } = await query('SELECT * FROM dossier_medical_global');
-        res.json(rows);
+
+        if (!id_hopitale) {
+            return res.status(400).json({
+                success: false,
+                message: "id_hopitale est requis"
+            });
+        }
+
+        const respons = await query(`
+            SELECT p.*, d.donnees_medicales FROM dossier_medical_global d
+            JOIN patient p ON d.id_patient= p.id_patient
+            JOIN hopital h ON h.id_hopital = d.id_hopital
+            WHERE h.id_hopital =  $1
+            `, [id_hopitale])
+
+        if (respons.rows.length == 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Aucun dossier trouvé pour cet hôpital"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            dossiers: respons.rows
+        });
+
     } catch (error) {
-        res.status(400).json(error);
+        res.status(400).json({
+            success: false,
+            message: "Erreur lors de la récupération des dossiers",
+            details: error.message
+        });
     }
 }
+
 const getAuthorisezeHopital = async (req, res) => {
     const { id_hopitale, nom_patient, nom_tuteur } = req.body;
-    const parseDate = (dateString) => {
-        const parsedDate = new Date(dateString);
-        return isNaN(parsedDate.getTime()) ? null : parsedDate;
-    };
-    // Validation des champs requis
+
     if (!id_hopitale || !nom_patient || !nom_tuteur) {
         return res.status(400).json({
             success: false,
@@ -353,7 +415,7 @@ const getAuthorisezeHopital = async (req, res) => {
     }
 
     try {
-        // 1. Vérification de l'existence de l'hôpital
+        // 1. Vérification de l'hôpital
         const hopitalResult = await query(
             'SELECT id_hopital, nom FROM hopital WHERE id_hopital = $1',
             [id_hopitale]
@@ -366,19 +428,17 @@ const getAuthorisezeHopital = async (req, res) => {
             });
         }
 
-        const hopital = hopitalResult.rows[0];
-
-        // 2. Recherche du patient avec vérification du tuteur
+        // 2. Recherche du patient
         const patientResult = await query(
-            `SELECT p.id_patient, p.nom, p.date_naissance, p.nom_tuteur, 
-                    d.id_dossier, d.cle_acces_dossier, d.date_creation
+            `SELECT p.id_patient, p.nom, p.prenom, p.date_naissance, p.nom_tuteur, 
+                    d.id_dossier, d.cle_acces_dossier
              FROM patient p
              JOIN dossier_medical_global d ON p.id_patient = d.id_patient
              WHERE p.nom = $1 AND p.nom_tuteur = $2`,
             [nom_patient.trim(), nom_tuteur.trim()]
         );
 
-        if (patientResult.rows.length == 0) {
+        if (patientResult.rows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "Aucun dossier médical trouvé pour ce patient/tuteur"
@@ -387,87 +447,48 @@ const getAuthorisezeHopital = async (req, res) => {
 
         const dossier = patientResult.rows[0];
 
-        // // 3. Génération et validation de la clé d'accès
-        // const clefGenere = genererCleAccesUnifiee({
-        //     nom: dossier.nom,
-        //     date_naissance: parseDate(dossier.date_naissance),
-        //     nom_tuteur: dossier.nom_tuteur
-        // });
-            
-        // if (clefGenere !== dossier.cle_acces_dossier) {
-        //     return res.status(403).json({
-        //         success: false,
-        //         message: "Clé d'accès invalide - Autorisation refusée",
-        //         clef: clefGenere,
-        //         dossierclef:dossier.cle_acces_dossier,
-        //         dossier: dossier,
-        //         date: parseDate(dossier.date_naissance)
-        //     }); 
-        // }
-
-        // 4. Vérification des droits existants pour éviter les doublons
+        // 3. Vérification si l'accès existe déjà
         const existingAccess = await query(
             `SELECT id FROM acces_autorise_par_cle_patient 
-             WHERE id_patient = $1 AND id_hopital_autorise = $2`,
-            [dossier.id_patient, id_hopitale]
+             WHERE id_hopital_autorise = $1 AND id_patient = $2`,
+            [id_hopitale, dossier.id_patient]
         );
 
         if (existingAccess.rows.length > 0) {
-            return res.status(409).json({
-                success: false,
-                message: "Cet hôpital a déjà accès à ce dossier"
+            // Mise à jour si accès existe déjà
+            await query(
+                `UPDATE acces_autorise_par_cle_patient
+                 SET date_autorisation = $1
+                 WHERE id_hopital_autorise = $2 AND id_patient = $3`,
+                [new Date(), id_hopitale, dossier.id_patient]
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: "Accès existant mis à jour",
+                donnees: dossier
             });
         }
 
-        // 5. Enregistrement de l'autorisation
-        const accesResult = await query(
+        // 4. Insertion si nouvel accès
+        await query(
             `INSERT INTO acces_autorise_par_cle_patient(
                 id_patient, 
                 id_hopital_autorise, 
                 date_autorisation, 
                 id_dossier_autorise
-             ) VALUES($1, $2, $3, $4) RETURNING *`,
+             ) VALUES($1, $2, $3, $4)`,
             [dossier.id_patient, id_hopitale, new Date(), dossier.id_dossier]
         );
 
-        // 6. Construction de la réponse
-        const responseData = {
-            hopital: {
-                id: hopital.id_hopital,
-                nom: hopital.nom
-            },
-            patient: {
-                id: dossier.id_patient,
-                nom: dossier.nom,
-                tuteur: dossier.nom_tuteur
-            },
-            dossier: {
-                id: dossier.id_dossier,
-                date_creation: dossier.date_creation,
-                dossier: dossier
-
-
-            },
-            autorisation: accesResult.rows[0]
-        };
-
-        return res.status(200).json({
+        return res.status(201).json({
             success: true,
             message: "Accès autorisé avec succès",
-            data: responseData
+            donnees: dossier
         });
 
     } catch (error) {
         console.error("Erreur serveur:", error);
-        
-        // Gestion spécifique des erreurs de base de données
-        if (error.code === '23505') {
-            return res.status(409).json({
-                success: false,
-                message: "Conflit: Cet hôpital a déjà accès à ce dossier"
-            });
-        }
-
         return res.status(500).json({
             success: false,
             message: "Erreur serveur",
@@ -475,6 +496,7 @@ const getAuthorisezeHopital = async (req, res) => {
         });
     }
 };
+
 const InsererPatientDossier = async (req, res) => {
     const { nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, donnee_dossier, code } = req.body;
 
@@ -1404,5 +1426,6 @@ module.exports = {
     getUserDetail,
     refreshToken,
     createNewPatient,
-    getAllDataTables
+    getAllDataTables,
+    getPatientAutorizeHopitale
 }

@@ -13,6 +13,7 @@ module.exports = (sequelize, DataTypes) => {
       Order.belongsTo(models.User, {foreignKey: 'userId', onDelete: 'CASCADE'})
     }
   }
+  
   Order.init({
     totalPrice: {type: DataTypes.FLOAT, allowNull: false},
   }, {
