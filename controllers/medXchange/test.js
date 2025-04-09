@@ -7,8 +7,7 @@ const upload = require('../../uploads/uploadProfess');
 const { envoyerNotificationUtilisateur } = require('../../controllers/medXchange/notification')
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
-const { genererCleAccesUnifiee } = require('../../helpers/generateKey')
-
+const { genererCleAccesUnifiee } = require('../../helpers/generateKey');
 
 
 const getPatientAutorizeHopitale = async (req, res) => {
@@ -64,7 +63,7 @@ const getAllDataTables = async (req, res) => {
             message: 'Accès non autorisé à cette table'
         });
     }
-
+ 
     try {
         // Utilisation de paramètres nommés pour plus de sécurité
         const sql = `SELECT * FROM ${table} WHERE id_hopital = $1`;
@@ -74,7 +73,7 @@ const getAllDataTables = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: 'Aucun enregistrement trouvé'
-            });
+            }); 
         }
 
         return res.status(200).json({
@@ -86,7 +85,6 @@ const getAllDataTables = async (req, res) => {
 
     } catch (error) {
         console.error('Erreur dans getAllTables:', error.message);
-
 
 
         return res.status(500).json({
@@ -377,7 +375,7 @@ const getdossier = async (req, res) => {
         }
 
         const respons = await query(`
-            SELECT p.*, d.donnees_medicales FROM dossier_medical_global d
+            SELECT p.*, d.* FROM dossier_medical_global d
             JOIN patient p ON d.id_patient= p.id_patient
             JOIN hopital h ON h.id_hopital = d.id_hopital
             WHERE h.id_hopital =  $1
@@ -392,7 +390,8 @@ const getdossier = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            dossiers: respons.rows
+            dossiers: respons.rows,
+            message: "Dossiers trouvés"
         });
 
     } catch (error) {
@@ -779,8 +778,6 @@ const importDossierMedicaleFromExcel = async (req, res) => {
 };
 
 
-
-
 const createPersonnelHopital = async (req, res) => {
     const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
 
@@ -1154,6 +1151,7 @@ const AjouterVaccin = async (req, res) => {
     }
 }
 
+
 const AjouterAllergie = async (req, res) => {
     const { id_dossier, id_utilisateur, date_allergie, detail } = req.body;
 
@@ -1404,6 +1402,8 @@ const getPatientsForshearch = async (req, res) => {
 
     }
 }
+
+
 module.exports = {
     getdossier,
     getPatientsForshearch,

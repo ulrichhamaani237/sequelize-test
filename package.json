@@ -36,6 +36,7 @@
     "body-parser": "^1.20.3",
     "brace-expansion": "^1.1.11",
     "braces": "^3.0.3",
+    "buffer": "^6.0.3",
     "buffer-equal-constant-time": "^1.0.1",
     "bytes": "^3.1.2",
     "call-bind-apply-helpers": "^1.0.1",
