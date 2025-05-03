@@ -1,5 +1,0 @@
-const express = require('express');
-const { createOder } = require('../../controllers/OrderController');
-const router = express.Router();
-
-router.post('/createOrder', createOder)
