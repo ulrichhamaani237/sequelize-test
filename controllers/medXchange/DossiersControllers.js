@@ -1,12 +1,107 @@
-require('dotenv').config();
+require("dotenv").config();
 const { query } = require("../../config/db");
+const { sendBulkNotifications } = require("./notification");
+const multer = require("multer");
+const path = require("path");
+
+// Configuration de multer pour les PDF
+const storagePdf = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, '../../uploads/pdfs'));
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+const uploadPdf = multer({
+  storage: storagePdf,
+  fileFilter: function (req, file, cb) {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers PDF sont autorisés'));
+    }
+  }
+});
+
+// Configuration de multer pour les images
+const storageImage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, '../../uploads/images'));
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+const uploadImage = multer({
+  storage: storageImage,
+  fileFilter: function (req, file, cb) {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers image sont autorisés'));
+    }
+  }
+});
+
+// Contrôleur pour ajouter un PDF
+const ajouterFichierPdf = async (req, res) => {
+  
+  uploadPdf.single('pdf')(req, res, async function (err) {
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Aucun fichier PDF fourni' });
+    }
+    // On suppose que l'id de la consultation est envoyé dans le body
+    const { id_consultation } = req.params;
+    if (!id_consultation) {
+      return res.status(400).json({ success: false, message: "id_consultation manquant" });
+    }
+    try {
+      await query(
+        "UPDATE consultation SET detail->>'carnet' = $1 WHERE id_consultation = $2",
+        [req.file.filename, id_consultation]
+      );
+      return res.status(200).json({ success: true, message: 'PDF uploadé et lié à la consultation', file: req.file.filename });
+    } catch (e) {
+      return res.status(500).json({ success: false, message: "Erreur lors de l'insertion dans la base de données", error: e.message });
+    }
+  });
+};
+
+// Contrôleur pour ajouter une image
+const ajouterImage = async (req, res) => {
+  uploadImage.single('image')(req, res, async function (err) {
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Aucune image fournie' });
+    }
+    // On suppose que l'id de la consultation est envoyé dans le body
+    const { id_consultation } = req.params;
+    if (!id_consultation) {
+      return res.status(400).json({ success: false, message: "id_consultation manquant" });
+    }
+    try {
+      await query(
+        "UPDATE consultation SET image = $1 WHERE id_consultation = $2",
+        [req.file.filename, id_consultation]
+      );
+      return res.status(200).json({ success: true, message: 'Image uploadée et liée à la consultation', file: req.file.filename });
+    } catch (e) {
+      return res.status(500).json({ success: false, message: "Erreur lors de l'insertion dans la base de données", error: e.message });
+    }
+  });
+};
 
 const dossierDetails = async (req, res) => {
   const { id_dossier } = req.params;
-  const { id_hopital } = req.body; // Préférable: récupérer depuis le token
-
+  const { id_hopital } = req.body;
+  const { id_utilisateur } = req.body;
   try {
-    // Validation
     if (!id_dossier) {
       return res.status(400).json({
         success: false,
@@ -21,14 +116,17 @@ const dossierDetails = async (req, res) => {
       });
     }
 
-    // Requête SQL
-    const dossierDetail = await query(`
-      SELECT p.*, d.donnees_medicales 
+    // Requête SQL pour recuperer les données du dossier et du patient
+    const dossierDetail = await query(
+      `
+      SELECT p.*, d.* 
       FROM dossier_medical_global d
       JOIN patient p ON d.id_patient = p.id_patient
       JOIN hopital h ON h.id_hopital = d.id_hopital
       WHERE h.id_hopital = $1 AND d.id_dossier = $2
-    `, [id_hopital, id_dossier]);
+    `,
+      [id_hopital, id_dossier]
+    );
 
     // Gestion des résultats
     if (dossierDetail.rows.length === 0) {
@@ -38,21 +136,172 @@ const dossierDetails = async (req, res) => {
       });
     }
 
+    const usersArryId = await query(
+      `SELECT id_utilisateur FROM utilisateur WHERE id_hopital = $1`,
+      [id_hopital]
+    );
+
+    if (usersArryId.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Aucun utilisateur trouvé",
+      });
+    }
+
+    const ArrayId = usersArryId.rows;
+    const user = await query(
+      `SELECT * FROM utilisateur WHERE id_utilisateur = $1`,
+      [id_utilisateur]
+    )
+
+    if (user.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Aucun utilisateur rencontré",
+      });
+    }
+
+    const message = `le dossier medicale de ${dossierDetail.rows[0].nom} ${dossierDetail.rows[0].prenom} a ete consulter par ${user.rows[0].nom} ${user.rows[0].prenom}`;
+    const notify = await sendBulkNotifications(
+      message,
+      ArrayId.map((user) => user.id_utilisateur),
+      "system"
+    );
+
+    if (!notify.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Erreur lors de l'envoi des notifications",
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      message: 'Dossier trouvé avec succès',
-      data: dossierDetail.rows[0] // Retourne un seul objet si l'ID est unique
+      message: "Dossier trouvé avec succès",
+      data: dossierDetail.rows[0],
+      notify: notify.message,
     });
-
   } catch (error) {
-    console.error('Erreur lors de la récupération du dossier:', error);
+    console.error("Erreur lors de la récupération du dossier:", error);
     return res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la récupération du dossier',
+      message: "Erreur serveur lors de la récupération du dossier",
     });
   }
 };
 
+const getConsultation = async (req, res) => {
+  const { id_dossier } = req.params;
+  
+  try {
+    const consultation = await query(
+      `SELECT 
+        c.*, 
+        u.nom, 
+        u.prenom, 
+        u.role,
+        (c.detail->>'dateConsultation') as date_consultation_detail,
+        (c.detail->>'heureConsultation') as heure_consultation_detail,
+        (c.detail->>'typeConsultation') as type_consultation,
+        (c.detail->>'motif') as motif,
+        (c.detail->>'temperature') as temperature,
+        (c.detail->>'poids') as poids,
+        (c.detail->>'taille') as taille,
+        (c.detail->>'tensionArterielle') as tension_arterielle,
+        (c.detail->>'frequenceCardiaque') as frequence_cardiaque,
+        (c.detail->>'saturationOxygene') as saturation_oxygene,
+        (c.detail->>'symptomes') as symptomes,
+        (c.detail->>'debutSymptomes') as debut_symptomes,
+        (c.detail->>'intensiteDouleur') as intensite_douleur,
+        (c.detail->>'etatGeneral') as etat_general,
+        (c.detail->>'conscience') as conscience,
+        (c.detail->>'examenPhysique') as examen_physique,
+        (c.detail->>'antecedentsMedicaux') as antecedents_medicaux,
+        (c.detail->>'allergies') as allergies,
+        (c.detail->>'medicamentsActuels') as medicaments_actuels,
+        (c.detail->>'diagnostic') as diagnostic,
+        (c.detail->>'diagnosticSecondaire') as diagnostic_secondaire,
+        (c.detail->>'traitement') as traitement,
+        (c.detail->>'prescription') as prescription,
+        (c.detail->>'examensComplementaires') as examens_complementaires,
+        (c.detail->>'recommandations') as recommandations,
+        (c.detail->>'prochainRendezVous') as prochain_rendez_vous,
+        (c.detail->>'orientationSpecialiste') as orientation_specialiste,
+        (c.detail->>'specialiste') as specialiste,
+        (c.detail->>'prescriptionMedicaments') as prescriptionMedicaments
+      FROM consultation c
+      JOIN utilisateur u ON c.id_utilisateur = u.id_utilisateur
+      WHERE id_dossier = $1 ORDER BY date_consultation DESC`,
+      [id_dossier]
+    );
+const consult = await query(
+  `SELECT 
+    c.*, 
+    u.nom, 
+    u.prenom, 
+    u.role,
+    (c.detail->>'dateConsultation') as date_consultation_detail,
+    (c.detail->>'heureConsultation') as heure_consultation_detail,
+    (c.detail->>'typeConsultation') as type_consultation,
+    (c.detail->>'motif') as motif,
+    (c.detail->>'temperature') as temperature,
+    (c.detail->>'poids') as poids,
+    (c.detail->>'taille') as taille,
+    (c.detail->>'tensionArterielle') as tension_arterielle,
+    (c.detail->>'frequenceCardiaque') as frequence_cardiaque,
+    (c.detail->>'saturationOxygene') as saturation_oxygene,
+    (c.detail->>'symptomes') as symptomes,
+    (c.detail->>'debutSymptomes') as debut_symptomes,
+    (c.detail->>'intensiteDouleur') as intensite_douleur,
+    (c.detail->>'etatGeneral') as etat_general,
+    (c.detail->>'conscience') as conscience,
+    (c.detail->>'examenPhysique') as examen_physique,
+    (c.detail->>'antecedentsMedicaux') as antecedents_medicaux,
+    (c.detail->>'allergies') as allergies,
+    (c.detail->>'medicamentsActuels') as medicaments_actuels,
+    (c.detail->>'diagnostic') as diagnostic,
+    (c.detail->>'diagnosticSecondaire') as diagnostic_secondaire,
+    (c.detail->>'traitement') as traitement,
+    (c.detail->>'prescription') as prescription,
+    (c.detail->>'examensComplementaires') as examens_complementaires,
+    (c.detail->>'recommandations') as recommandations,
+    (c.detail->>'prochainRendezVous') as prochain_rendez_vous,
+    (c.detail->>'orientationSpecialiste') as orientation_specialiste,
+    (c.detail->>'specialiste') as specialiste
+  FROM consultation c
+  JOIN utilisateur u ON c.id_utilisateur = u.id_utilisateur
+  WHERE id_dossier = $1 ORDER BY date_consultation DESC LIMIT 2`,
+  [id_dossier]
+);
+    if (consultation.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Aucune consultation trouvée"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Consultations trouvées",
+      data: {
+        alldata:consultation.rows,
+        twodata: consult.rows
+      }
+    });
+  } catch (error) {
+    console.error("Erreur lors de la récupération des consultations:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la récupération des consultations"
+    });
+  }
+}
+
+
+
 module.exports = {
-  dossierDetails
+  dossierDetails,
+  getConsultation,
+  ajouterFichierPdf,
+  ajouterImage
 };

@@ -8,7 +8,7 @@ const { envoyerNotificationUtilisateur } = require('../../controllers/medXchange
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const { genererCleAccesUnifiee } = require('../../helpers/generateKey');
-
+const path = require('path');
 
 const getPatientAutorizeHopitale = async (req, res) => {
 
@@ -63,7 +63,7 @@ const getAllDataTables = async (req, res) => {
             message: 'Accès non autorisé à cette table'
         });
     }
- 
+
     try {
         // Utilisation de paramètres nommés pour plus de sécurité
         const sql = `SELECT * FROM ${table} WHERE id_hopital = $1`;
@@ -73,7 +73,7 @@ const getAllDataTables = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: 'Aucun enregistrement trouvé'
-            }); 
+            });
         }
 
         return res.status(200).json({
@@ -901,19 +901,51 @@ const AjouterTraitement = async (req, res) => {
 }
 
 const AjouterConsultation = async (req, res) => {
-    const { id_dossier, id_utilisateur, date_consultation, detail } = req.body;
+    const { id_dossier, id_utilisateur, detail } = req.body;
+    const image = req.file ;
+    const pdfCarnet = req.file ;
+
 
     // Validation des champs obligatoires
-    if (!id_dossier || id_utilisateur || !date_consultation || !detail) {
+    if (!id_dossier || !id_utilisateur || !detail) {
         return res.status(400).json({ error: "Tous les champs sont requis" });
     }
 
     try {
+        // Parse detail s'il est en JSON string
+        if (typeof detail === 'string') {
+            detail = JSON.parse(detail);
+        }
+
+        // Dossier de destination
+        const uploadDir = path.join(__dirname, '../../uploads/consultations');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        // Ajouter l'URL de l'image si présente
+        if (image) {
+            const imageFile = Array.isArray(image) ? image[0] : image;
+            const imageName = Date.now() + '_' + imageFile.name;
+            const imagePath = path.join(uploadDir, imageName);
+            await imageFile.mv(imagePath);
+            detail.imageRadiologie = `${req.protocol}://${req.get('host')}/uploads/consultations/${imageName}`;
+        }
+
+        // Ajouter l'URL du PDF si présent
+        if (pdfCarnet) {
+            const pdfFile = Array.isArray(pdfCarnet) ? pdfCarnet[0] : pdfCarnet;
+            const pdfName = Date.now() + '_' + pdfFile.name;
+            const pdfPath = path.join(uploadDir, pdfName);
+            await pdfFile.mv(pdfPath);
+            detail.pdfCarnet = `${req.protocol}://${req.get('host')}/uploads/consultations/${pdfName}`;
+        }
 
         // Insertion du traitement
         const result = await query(
             'INSERT INTO consultation(id_dossier,id_utilisateur,date_consultation,detail) VALUES($1, $2, $3,$4) RETURNING *',
-            [id_dossier, id_utilisateur, date_consultation, detail]
+            [id_dossier, id_utilisateur, new Date(), detail]
+
         );
 
         const resultatSelect = await query(
@@ -922,31 +954,42 @@ const AjouterConsultation = async (req, res) => {
         )
 
         if (resultatSelect.rows.length === 0) {
-            return res.status(404).json({ error: "Utilisateur non trouvé" });
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur non trouvé',
+                error: 'Utilisateur non trouvé'
+            });
         }
 
 
 
         if (result.rows.length === 0) {
-            return res.status(500).json({ error: "Échec de l'insertion de la consultation" });
+            return res.status(500).json({
+                success: false,
+                message: 'Échec de l\'insertion de la consultation',
+                error: 'Échec de l\'insertion de la consultation'
+            });
         }
 
-        // Notification
-        await client.query(
-            `SELECT pg_notify(
-                'nouvelle_consultation', 
-                json_build_object(
-                    'event', 'insert',
-                    'table', 'consultation',
-                    'data', $1,
-                    'utilisateur', $2,
-                )::text
-            )`,
-            [result.rows[0], resultatSelect.rows[0]]
-        );
+        // // Notification
+        // await client.query(
+        //     `SELECT pg_notify(
+        //         'nouvelle_consultation', 
+        //         json_build_object(
+        //             'event', 'insert',
+        //             'table', 'consultation',
+        //             'data', $1,
+        //             'utilisateur', $2,
+        //         )::text
+        //     )`,
+        //     [result.rows[0], resultatSelect.rows[0]]
+        // );
 
-        return res.status(201).json(result.rows[0]);
-
+        return res.status(201).json({
+            success: true,
+            message: 'Consultation ajoutée avec succès',
+            data: result.rows[0]
+        });
     } catch (error) {
         console.error("Erreur SQL:", error);
         return res.status(500).json({
