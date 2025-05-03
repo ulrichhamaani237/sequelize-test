@@ -4,9 +4,6 @@ const http = require('http');
 const socketIO = require('socket.io');
 const { setupNotificationClient,setupUserNotificationClient } = require('./config/db');
 const bodyParser = require('body-parser');
-const userRoute = require('./routes/api/UserRoutes');
-const OrderRoute = require('./routes/api/OderRoute');
-const cineRoute = require('./routes/api/CineRoutes');
 const patientRoutes = require('./routes/api/PatientRoutes');
 const ProfessionnelSanteRoutes = require('./routes/api/ProfessionnelSanteRoutes');
 const medXchangeRoute = require('./routes/api/medXchangeRoute');
@@ -45,9 +42,6 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // routes middleware 
-app.use('/user', userRoute);
-app.use('/order', OrderRoute);
-app.use('/actors', cineRoute);
 app.use('/patients', patientRoutes);
 app.use('/professionnels', ProfessionnelSanteRoutes);
 app.use('/dossier', medXchangeRoute);
