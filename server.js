@@ -19,7 +19,7 @@ const io = socketIO(server, {
 });
 
 // Rendre io accessible globalement
-global.io = io;
+global.socket = io;
 
 // gestion des connection socketIO
 io.on('connection', (socket) => {

@@ -8,6 +8,7 @@ const { envoyerNotificationUtilisateur } = require('../../controllers/medXchange
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const { genererCleAccesUnifiee } = require('../../helpers/generateKey');
+const { addLogs } = require('./LogsControllers');
 const path = require('path');
 
 const getPatientAutorizeHopitale = async (req, res) => {
@@ -970,26 +971,35 @@ const AjouterConsultation = async (req, res) => {
                 error: 'Échec de l\'insertion de la consultation'
             });
         }
+  
+        // Ajouter les logs
+        try {
+          const resultLog = await addLogs({
+            id_dossier: id_dossier,
+            id_hopital: resultatSelect.rows[0].id_hopital, 
+            id_utilisateur: id_utilisateur,
+            date_acces: new Date(),
+            type_action: 'insert',
+            operation_type: 'consultation',
+            dossier_username: resultatSelect.rows[0].nom,
+            target_type: 'consultation',
+            details: result.rows[0].detail
+          });
 
-        // // Notification
-        // await client.query(
-        //     `SELECT pg_notify(
-        //         'nouvelle_consultation', 
-        //         json_build_object(
-        //             'event', 'insert',
-        //             'table', 'consultation',
-        //             'data', $1,
-        //             'utilisateur', $2,
-        //         )::text
-        //     )`,
-        //     [result.rows[0], resultatSelect.rows[0]]
-        // );
-
-        return res.status(201).json({
+          return res.status(201).json({
             success: true,
             message: 'Consultation ajoutée avec succès',
-            data: result.rows[0]
-        });
+            data: result.rows[0],
+            log: resultLog
+          });
+        } catch (error) {
+          console.error("Erreur lors de l'ajout des logs:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Erreur lors de l'enregistrement des logs",
+            error: error.message
+          });
+        }
     } catch (error) {
         console.error("Erreur SQL:", error);
         return res.status(500).json({
@@ -1022,7 +1032,24 @@ const AjouterDiagnostic = async (req, res) => {
 
 
 
-        return res.status(201).json(result.rows[0]);
+        // Ajouter les logs
+      const resultLog = await addLogs({
+            id_dossier: id_dossier,
+            id_utilisateur: id_utilisateur,
+            date_acces: new Date(),
+            type_action: 'insert',
+            operation_type: 'diagnostic',
+            dossier_username: resultatSelect.rows[0].username,
+            target_type: 'diagnostic',
+            details: result.rows[0]
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Diagnostic ajouté avec succès',
+            data: result.rows[0],
+            log: resultLog
+        });
 
     } catch (error) {
         console.error("Erreur SQL:", error);
@@ -1054,7 +1081,24 @@ const AjouterOrdonnance = async (req, res) => {
             return res.status(500).json({ error: "Échec de l'insertion de l'ordonnance" });
         }
 
-        return res.status(201).json(result.rows[0]);
+        // Ajouter les logs
+      const resultLog = await addLogs({
+            id_dossier: id_dossier,
+            id_utilisateur: id_utilisateur,
+            date_acces: new Date(),
+            type_action: 'insert',
+            operation_type: 'ordonnance',
+            dossier_username: resultatSelect.rows[0].username,
+            target_type: 'ordonnance',
+            details: result.rows[0]
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Ordonnance ajoutée avec succès',
+            data: result.rows[0],
+            log: resultLog
+        });
 
     } catch (error) {
         console.error("Erreur SQL:", error);
@@ -1086,7 +1130,24 @@ const AjouterResultat = async (req, res) => {
             return res.status(500).json({ error: "Échec de l'insertion du resultat" });
         }
 
-        return res.status(201).json(result.rows[0]);
+        // Ajouter les logs
+      const resultLog = await addLogs({
+            id_dossier: id_dossier,
+            id_utilisateur: id_utilisateur,
+            date_acces: new Date(),
+            type_action: 'insert',
+            operation_type: 'resultat',
+            dossier_username: resultatSelect.rows[0].username,
+            target_type: 'resultat',
+            details: result.rows[0]
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Resultat ajouté avec succès',
+            data: result.rows[0],
+            log: resultLog
+        });
 
     } catch (error) {
         console.error("Erreur SQL:", error);
@@ -1118,7 +1179,24 @@ const AjouterHospitalisation = async (req, res) => {
             return res.status(500).json({ error: "Échec de l'insertion de l'hospitalisation" });
         }
 
-        return res.status(201).json(result.rows[0]);
+        // Ajouter les logs
+      const resultLog = await addLogs({
+            id_dossier: id_dossier,
+            id_utilisateur: id_utilisateur,
+            date_acces: new Date(),
+            type_action: 'insert',
+            operation_type: 'hospitalisation',
+            dossier_username: resultatSelect.rows[0].username,
+            target_type: 'hospitalisation',
+            details: result.rows[0]
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Hospitalisation ajoutée avec succès',
+            data: result.rows[0],
+            log: resultLog
+        });
 
     } catch (error) {
         console.error("Erreur SQL:", error);

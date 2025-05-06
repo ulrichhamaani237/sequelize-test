@@ -141,7 +141,7 @@ const sendNotifications = async (req, res) => {
     };
 
     // Accéder à io depuis global
-    global.io.emit(`notification_${id_utilisateur}`, formattedNotification);
+    global.socket.emit(`notification_${id_utilisateur}`, formattedNotification);
 
     return res.status(201).json({
       success: true,
@@ -246,7 +246,7 @@ function formatTimeAgo(date) {
 //         read: false,
 //         type: notif.type || 'system'
 //       };
-//       global.io.emit(`notification_${notif.id_utilisateur}`, formattedNotif);
+//       global.socket.emit(`notification_${notif.id_utilisateur}`, formattedNotif);
 //     });
 
 //     return res.status(201).json({
@@ -337,7 +337,7 @@ async function sendBulkNotifications(message, userIds, type = "system") {
 
     // Émission des notifications en temps réel
     response.rows.forEach((notif) => {
-     global.io.emit(`notification_${notif.id_utilisateur}`, {
+      global.socket.emit(`notification_${notif.id_utilisateur}`, {
         id: notif.id,
         message: notif.message,
         time: "À l'instant",
@@ -345,9 +345,6 @@ async function sendBulkNotifications(message, userIds, type = "system") {
         type: notif.type || "system",
       });
     });
-
-  
-
 
     return {
       success: true,

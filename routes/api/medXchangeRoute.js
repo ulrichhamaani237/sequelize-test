@@ -26,6 +26,7 @@ const {
   sendNotifications,
 } = require("../../controllers/medXchange/notification");
 const { protectionRoute } = require("../../midleware/protectionRoute");
+const { getLogs } = require("../../controllers/medXchange/LogsControllers");
 // const upload = require('../../uploads/uploadProfess');
 // Dans votre fichier de routes
 const upload = multer({
@@ -41,7 +42,7 @@ const upload = multer({
   },
 });
 
-console.log(protectionRoute);
+// console.log(protectionRoute);
 router.post("/dossier_medical_global", getdossier);
 router.get("/patient-for-search", getPatientsForshearch);
 router.post("/getdatatable", getAllDataTables);
@@ -53,6 +54,7 @@ router.post("/login", LoginUtilisateur);
 router.post("/");
 router.post("/newpatient", createNewPatient);
 router.post("/logout", protectionRoute, logout);
+router.post("/logs",getLogs);
 router.post(
   "/importDossierMedicale",
   upload.single("file"),
@@ -81,9 +83,8 @@ router.get("/profile", protectionRoute, async (req, res) => {
 // notifacations ----------------------------------------------------------------------------
 router.get('/notifications/:id_utilisateur', notifications);
 router.post('/notifications', sendNotifications); // Correction: Ajouter '/' avant 'notifications'
-module.exports = router;
-
 
 //dossier -----------------------------------------------------------------------------------
 
 router.post('/dossierdetails/:id_dossier', dossierDetails)
+module.exports = router;

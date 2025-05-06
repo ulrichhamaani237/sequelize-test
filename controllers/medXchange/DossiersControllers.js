@@ -299,9 +299,10 @@ const consult = await query(
 
 
 
+
 module.exports = {
   dossierDetails,
   getConsultation,
   ajouterFichierPdf,
-  ajouterImage
+  ajouterImage,
 };
