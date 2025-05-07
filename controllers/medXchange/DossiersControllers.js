@@ -4,6 +4,45 @@ const { sendBulkNotifications } = require("./notification");
 const multer = require("multer");
 const path = require("path");
 
+
+
+const addPatient = async (req, res) => {
+  try {
+    const { nom, prenom, date_naissance, age, sexe, taille, adresse, nom_tuteur, photo } = req.body;
+    const id_hopital = req.params.id_hopital;  // Au lieu de req.params 
+    if (!id_hopital || !nom || !prenom || !date_naissance || !age || !sexe || !taille || !adresse || !nom_tuteur) {
+      return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
+    }
+
+    const patient = await query(
+      `INSERT INTO patient (nom, prenom, date_naissance, nom_tuteur,id_hopital, adresse,sexe, age, taille, photo) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+             RETURNING *`,
+      [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, sexe, age, taille, photo]
+    );
+
+    if (!patient.rows.length) {
+      return res.status(404).json({ success: false, message: "Patient non trouvé" });
+    }
+
+    const dossier = await query(
+      `INSERT INTO dossier_medical_global (id_patient,id_hopital,date_creation) 
+             VALUES ($1,$2,$3) 
+             RETURNING *`,
+      [patient.rows[0].id_patient, id_hopital, new Date()]
+    );
+
+    if (!dossier.rows.length) {
+      return res.status(404).json({ success: false, message: "Dossier non trouvé" });
+    }
+
+    return res.status(201).json({ success: true, message: "Patient ajouté avec succès", patient: patient.rows[0], dossier: dossier.rows[0] });
+  } catch (error) {
+    console.error("Erreur lors de l'ajout du patient:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de l'ajout du patient" });
+  }
+}
+
 // Configuration de multer pour les PDF
 const storagePdf = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -46,7 +85,7 @@ const uploadImage = multer({
 
 // Contrôleur pour ajouter un PDF
 const ajouterFichierPdf = async (req, res) => {
-  
+
   uploadPdf.single('pdf')(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -192,7 +231,7 @@ const dossierDetails = async (req, res) => {
 
 const getConsultation = async (req, res) => {
   const { id_dossier } = req.params;
-  
+
   try {
     const consultation = await query(
       `SELECT 
@@ -234,8 +273,8 @@ const getConsultation = async (req, res) => {
       WHERE id_dossier = $1 ORDER BY date_consultation DESC`,
       [id_dossier]
     );
-const consult = await query(
-  `SELECT 
+    const consult = await query(
+      `SELECT 
     c.*, 
     u.nom, 
     u.prenom, 
@@ -271,8 +310,8 @@ const consult = await query(
   FROM consultation c
   JOIN utilisateur u ON c.id_utilisateur = u.id_utilisateur
   WHERE id_dossier = $1 ORDER BY date_consultation DESC LIMIT 2`,
-  [id_dossier]
-);
+      [id_dossier]
+    );
     if (consultation.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -284,7 +323,7 @@ const consult = await query(
       success: true,
       message: "Consultations trouvées",
       data: {
-        alldata:consultation.rows,
+        alldata: consultation.rows,
         twodata: consult.rows
       }
     });
@@ -297,9 +336,9 @@ const consult = await query(
   }
 }
 
-const deleteDossier = async (req, res) =>{
-  
-  const {id_dossier } = req.body;
+const deleteDossier = async (req, res) => {
+
+  const { id_dossier } = req.body;
 
   try {
     const dossier = await query(
@@ -320,8 +359,8 @@ const deleteDossier = async (req, res) =>{
 
 }
 
-const deletePatient = async (req, res) =>{
-  const {id_patient } = req.body;
+const deletePatient = async (req, res) => {
+  const { id_patient } = req.body;
 
   try {
     const patient = await query(
@@ -342,8 +381,8 @@ const deletePatient = async (req, res) =>{
 
 }
 
-const deleteConsultation = async (req, res) =>{
-  const {id_consultation } = req.body;
+const deleteConsultation = async (req, res) => {
+  const { id_consultation } = req.body;
 
   try {
     const consultation = await query(
@@ -365,25 +404,25 @@ const deleteConsultation = async (req, res) =>{
 }
 
 const editPatient = async (req, res) => {
-    const { 
-        nom, 
-        prenom, 
-        date_naissance, 
-        nom_tuteur, 
-        id_hopital, 
-        adresse, 
-        donnees, 
-        code, 
-        sexe, 
-        taille, 
-        age ,
-        photo
-    } = req.body;
-  const {id_patient} = req.params;
+  const {
+    nom,
+    prenom,
+    date_naissance,
+    nom_tuteur,
+    id_hopital,
+    adresse,
+    donnees,
+    code,
+    sexe,
+    taille,
+    age,
+    photo
+  } = req.body;
+  const { id_patient } = req.params;
 
-    try {
-        const patient = await query(
-            `UPDATE patient 
+  try {
+    const patient = await query(
+      `UPDATE patient 
              SET nom = $1, 
                  prenom = $2, 
                  date_naissance = $3, 
@@ -397,57 +436,57 @@ const editPatient = async (req, res) => {
                  age = $11,
                  photo = $12 
              WHERE id_patient = $13`,
-            [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, code, sexe, taille, age, photo, id_patient]
-        );
-        if (!patient.rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Patient non trouvé"
-            });
-        }
-        
-        return res.status(200).json({
-            success: true,
-            message: "Patient modifié avec succès"
-        });
-    } catch (error) {
-        console.error("Erreur lors de la modification du patient:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Erreur lors de la modification du patient",
-            error: error.message
-        });
+      [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, code, sexe, taille, age, photo, id_patient]
+    );
+    if (!patient.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient non trouvé"
+      });
     }
+
+    return res.status(200).json({
+      success: true,
+      message: "Patient modifié avec succès"
+    });
+  } catch (error) {
+    console.error("Erreur lors de la modification du patient:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la modification du patient",
+      error: error.message
+    });
+  }
 };
 
 const getPatientById = async (req, res) => {
-    const { id_patient } = req.params;
-    try {
-        const patient = await query(
-            `SELECT * FROM patient WHERE id_patient = $1`,
-            [id_patient]
-        );
+  const { id_patient } = req.params;
+  try {
+    const patient = await query(
+      `SELECT * FROM patient WHERE id_patient = $1`,
+      [id_patient]
+    );
 
-        if (!patient.rows.length) {
-            return res.status(404).json({
-                success: false,
-                message: "Patient non trouvé"
-            });
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: "Patient trouvé avec succès",
-            data: patient.rows[0]
-        });
-    } catch (error) {
-        console.error("Erreur lors de la recherche du patient:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Erreur lors de la recherche du patient",
-            error: error.message
-        });
+    if (!patient.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient non trouvé"
+      });
     }
+
+    return res.status(200).json({
+      success: true,
+      message: "Patient trouvé avec succès",
+      data: patient.rows[0]
+    });
+  } catch (error) {
+    console.error("Erreur lors de la recherche du patient:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la recherche du patient",
+      error: error.message
+    });
+  }
 };
 
 
@@ -462,5 +501,6 @@ module.exports = {
   deletePatient,
   deleteConsultation,
   editPatient,
-  getPatientById
+  getPatientById,
+  addPatient
 };

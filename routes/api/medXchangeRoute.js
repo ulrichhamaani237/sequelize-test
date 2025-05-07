@@ -20,7 +20,7 @@ const {
   getPatientsForshearch,
   getPatientAutorizeHopitale,
 } = require("../../controllers/medXchange/test");
-const {dossierDetails, getConsultation,deletePatient,deleteConsultation, editPatient, getPatientById} = require('../../controllers/medXchange/DossiersControllers')
+const {dossierDetails, getConsultation,deletePatient,deleteConsultation, editPatient, getPatientById, addPatient} = require('../../controllers/medXchange/DossiersControllers')
 const {
   notifications,
   sendNotifications,
@@ -47,6 +47,7 @@ router.post("/dossier_medical_global", getdossier);
 router.get("/patient-for-search", getPatientsForshearch);
 router.post("/deletepatient", deletePatient);
 router.post("/editpatient/:id_patient", editPatient);
+router.post("/addpatient/:id_hopital", addPatient);
 router.get("/getpatient/:id_patient", getPatientById);
 router.post("/deleteconsultation", deleteConsultation);
 router.post("/getdatatable", getAllDataTables);
