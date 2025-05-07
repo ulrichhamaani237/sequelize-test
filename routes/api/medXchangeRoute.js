@@ -20,7 +20,7 @@ const {
   getPatientsForshearch,
   getPatientAutorizeHopitale,
 } = require("../../controllers/medXchange/test");
-const {dossierDetails, getConsultation} = require('../../controllers/medXchange/DossiersControllers')
+const {dossierDetails, getConsultation,deletePatient,deleteConsultation, editPatient, getPatientById} = require('../../controllers/medXchange/DossiersControllers')
 const {
   notifications,
   sendNotifications,
@@ -45,6 +45,10 @@ const upload = multer({
 // console.log(protectionRoute);
 router.post("/dossier_medical_global", getdossier);
 router.get("/patient-for-search", getPatientsForshearch);
+router.post("/deletepatient", deletePatient);
+router.post("/editpatient/:id_patient", editPatient);
+router.get("/getpatient/:id_patient", getPatientById);
+router.post("/deleteconsultation", deleteConsultation);
 router.post("/getdatatable", getAllDataTables);
 router.get("/consultation/:id_dossier",getConsultation);
 router.post("/consultation",upload.single("file"), AjouterConsultation);

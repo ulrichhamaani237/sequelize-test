@@ -297,6 +297,159 @@ const consult = await query(
   }
 }
 
+const deleteDossier = async (req, res) =>{
+  
+  const {id_dossier } = req.body;
+
+  try {
+    const dossier = await query(
+      `DELETE FROM dossier_medical_global WHERE id_dossier = $1`,
+      [id_dossier]
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Dossier supprimé avec succès"
+    });
+  } catch (error) {
+    console.error("Erreur lors de la suppression du dossier:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la suppression du dossier"
+    });
+  }
+
+}
+
+const deletePatient = async (req, res) =>{
+  const {id_patient } = req.body;
+
+  try {
+    const patient = await query(
+      `DELETE FROM patient WHERE id_patient = $1`,
+      [id_patient]
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Patient supprimé avec succès"
+    });
+  } catch (error) {
+    console.error("Erreur lors de la suppression du patient:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la suppression du patient"
+    });
+  }
+
+}
+
+const deleteConsultation = async (req, res) =>{
+  const {id_consultation } = req.body;
+
+  try {
+    const consultation = await query(
+      `DELETE FROM consultation WHERE id_consultation = $1`,
+      [id_consultation]
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Consultation supprimée avec succès"
+    });
+  } catch (error) {
+    console.error("Erreur lors de la suppression de la consultation:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la suppression de la consultation"
+    });
+  }
+
+}
+
+const editPatient = async (req, res) => {
+    const { 
+        nom, 
+        prenom, 
+        date_naissance, 
+        nom_tuteur, 
+        id_hopital, 
+        adresse, 
+        donnees, 
+        code, 
+        sexe, 
+        taille, 
+        age ,
+        photo
+    } = req.body;
+  const {id_patient} = req.params;
+
+    try {
+        const patient = await query(
+            `UPDATE patient 
+             SET nom = $1, 
+                 prenom = $2, 
+                 date_naissance = $3, 
+                 nom_tuteur = $4, 
+                 id_hopital = $5, 
+                 adresse = $6, 
+                 donnees = $7, 
+                 code = $8, 
+                 sexe = $9, 
+                 taille = $10, 
+                 age = $11,
+                 photo = $12 
+             WHERE id_patient = $13`,
+            [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, code, sexe, taille, age, photo, id_patient]
+        );
+        if (!patient.rows.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Patient non trouvé"
+            });
+        }
+        
+        return res.status(200).json({
+            success: true,
+            message: "Patient modifié avec succès"
+        });
+    } catch (error) {
+        console.error("Erreur lors de la modification du patient:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Erreur lors de la modification du patient",
+            error: error.message
+        });
+    }
+};
+
+const getPatientById = async (req, res) => {
+    const { id_patient } = req.params;
+    try {
+        const patient = await query(
+            `SELECT * FROM patient WHERE id_patient = $1`,
+            [id_patient]
+        );
+
+        if (!patient.rows.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Patient non trouvé"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Patient trouvé avec succès",
+            data: patient.rows[0]
+        });
+    } catch (error) {
+        console.error("Erreur lors de la recherche du patient:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Erreur lors de la recherche du patient",
+            error: error.message
+        });
+    }
+};
+
 
 
 
@@ -305,4 +458,9 @@ module.exports = {
   getConsultation,
   ajouterFichierPdf,
   ajouterImage,
+  deleteDossier,
+  deletePatient,
+  deleteConsultation,
+  editPatient,
+  getPatientById
 };
