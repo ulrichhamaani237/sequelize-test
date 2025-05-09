@@ -20,6 +20,7 @@ const pool = new Pool({
 });
 
 
+
 const setupUserNotificationClient = async () => {
   const client = await pool.connect();
   

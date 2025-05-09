@@ -3,8 +3,126 @@ const { query } = require("../../config/db");
 const { sendBulkNotifications } = require("./notification");
 const multer = require("multer");
 const path = require("path");
+const bcrypt = require("bcrypt");
 
 
+const addPersonnel = async (req, res) => {
+  try {
+
+    const {
+      nom,
+      prenom,
+      email,
+      mot_de_passe_hash,
+      role,
+      sexe,
+      specialite } = req.body;
+
+    const id_hopital = req.params.id_hopital;
+
+    if (!nom || !prenom || !email || !mot_de_passe_hash || !role || !id_hopital || !specialite || !sexe) {
+      return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
+    }
+
+    const motDePasseHash = await bcrypt.hash(mot_de_passe_hash, 10);
+
+    const personnel = await query(
+      `INSERT INTO utilisateur(nom, prenom, email,mot_de_passe_hash,role,id_hopital,specialite,sexe)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
+      `,
+      [nom, prenom, email, motDePasseHash, role, id_hopital, specialite, sexe]
+    )
+
+    if (!personnel.rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "erreur lors de l inserton"
+      })
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Personnel ajouté avec succès",
+      personnel: personnel.rows[0]
+    })
+
+  } catch (error) {
+    console.error("Erreur lors de l'ajout du personnel:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de l'ajout du personnel" });
+  }
+}
+
+const getPersonnelById = async (req, res) => {
+  try {
+    const id_utilisateur = req.params.id_utilisateur;
+    const personnel = await query(
+      `SELECT * FROM utilisateur WHERE id_utilisateur = $1`,
+      [id_utilisateur]
+    );
+    if (!personnel.rows.length) {
+      return res.status(404).json({ success: false, message: "Personnel non trouvé" });
+    }
+    return res.status(200).json({ success: true, message: "Personnel trouvé avec succès", personnel: personnel.rows[0] });
+  } catch (error) {
+    console.error("Erreur lors de la recherche du personnel:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de la recherche du personnel" });
+  }
+}
+
+const editPersonnel = async (req, res) => {
+  try {
+    const { nom, prenom, email, mot_de_passe_hash, role, specialite, sexe } = req.body;
+    const id_utilisateur = req.params.id_utilisateur;
+    if (!id_utilisateur || !nom || !prenom || !email || !mot_de_passe_hash || !role || !specialite || !sexe) {
+      return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
+    }
+    const personnel = await query(
+      `UPDATE utilisateur SET nom = $1, prenom = $2, email = $3, mot_de_passe_hash = $4, role = $5, specialite = $6,sexe = $7 WHERE id_utilisateur = $8 RETURNING *`,
+      [nom, prenom, email, mot_de_passe_hash, role, specialite, sexe, id_utilisateur]
+    );
+    if (!personnel.rows.length) {
+      return res.status(404).json({ success: false, message: "Personnel non trouvé" });
+    }
+    return res.status(200).json({ success: true, message: "Personnel modifié avec succès", personnel: personnel.rows[0] });
+  } catch (error) {
+    console.error("Erreur lors de la modification du personnel:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de la modification du personnel" });
+  }
+}
+
+const setActivePersonnel = async (req, res) => {
+  try {
+    const id_utilisateur = req.params.id_utilisateur;
+    const personnel = await query(
+      `UPDATE utilisateur SET is_not_active = $1 WHERE id_utilisateur = $2 RETURNING *`,
+      [true, id_utilisateur]
+    );
+    if (!personnel.rows.length) {
+      return res.status(404).json({ success: false, message: "Personnel non trouvé" });
+    }
+    return res.status(200).json({ success: true, message: "Personnel activé avec succès", personnel: personnel.rows[0] });
+  } catch (error) {
+    console.error("Erreur lors de l'activation du personnel:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de l'activation du personnel" });
+  }
+}
+
+const setInactivePersonnel = async (req, res) => {
+  try {
+    const id_utilisateur = req.params.id_utilisateur;
+    const personnel = await query(
+      `UPDATE utilisateur SET is_not_active = $1 WHERE id_utilisateur = $2 RETURNING *`,
+      [false, id_utilisateur]
+    );
+    if (!personnel.rows.length) {
+      return res.status(404).json({ success: false, message: "Personnel non trouvé" });
+    }
+    return res.status(200).json({ success: true, message: "Personnel desactivé avec succès", personnel: personnel.rows[0] });
+  } catch (error) {
+    console.error("Erreur lors de la desactivation du personnel:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de la desactivation du personnel" });
+  }
+}
 
 const addPatient = async (req, res) => {
   try {
@@ -502,5 +620,10 @@ module.exports = {
   deleteConsultation,
   editPatient,
   getPatientById,
-  addPatient
+  addPatient,
+  setActivePersonnel,
+  setInactivePersonnel,
+  editPersonnel,
+  addPersonnel,
+  getPersonnelById
 };

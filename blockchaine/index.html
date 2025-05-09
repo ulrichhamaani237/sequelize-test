@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebAuthn Enrôlement</title>
+</head>
+<body>
+  <h1>WebAuthn Médical</h1>
+  <input id="username" placeholder="Nom d'utilisateur" />
+  <button onclick="register()">S’enrôler</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser/dist/simplewebauthn-browser.umd.min.js"></script>
+  <script>
+    async function register() {
+      const username = document.getElementById("username").value;
+
+      try {
+        // 1. Obtenir les options d’enrôlement depuis le serveur
+        const optionsRes = await fetch("http://localhost:5500/generate-registration-options", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username }),
+        });
+        const options = await optionsRes.json();
+
+        // 2. Démarrer l'enrôlement
+        const attResp = await SimpleWebAuthnBrowser.startRegistration(options);
+
+        // 3. Envoyer la réponse au serveur pour vérification
+        const verifyRes = await fetch("http://localhost:5500/verify-registration", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, attestationResponse: attResp }),
+        });
+
+        const verifyResult = await verifyRes.json();
+        if (verifyRes.ok) {
+          alert("Enrôlement réussi !");
+        } else {
+          throw new Error(verifyResult.error || "Erreur lors de la vérification");
+        }
+      } catch (error) {
+        console.error("Erreur:", error);
+        alert("Erreur lors de l'enrôlement: " + error.message);
+      }
+    }
+  </script>
+</body>
+</html>

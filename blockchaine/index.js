@@ -1,57 +1,68 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const { Blockchain, MedicalRecord } = require('./blockchain');
-const axios = require('axios');
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require("@simplewebauthn/server");
 
 const app = express();
+const port = 3000;
+
+app.use(cors());
 app.use(bodyParser.json());
+app.use(express.static("public"));
 
-const port = process.env.PORT || 3000;
-const nodeAddress = `http://localhost:${port}`;
+let users = {}; // Simule une "base de données" d'utilisateurs
 
-const medicalChain = new Blockchain();
+app.post("/generate-registration-options", (req, res) => {
+  const { username } = req.body;
+  const userId = username;
 
-// Endpoints
-app.post('/record', (req, res) => {
-  const { record, signature, publicKey } = req.body;
+  const options = generateRegistrationOptions({
+    rpName: "Blockchain Médicale",
+    rpID: "localhost",
+    userID: userId,
+    userName: username,
+    timeout: 60000,
+    attestationType: "none",
+    authenticatorSelection: {
+      userVerification: "preferred",
+    },
+  });
+
+  users[userId] = {
+    username,
+    credentials: [],
+    currentChallenge: options.challenge,
+  };
+
+  res.json(options);
+});
+
+app.post("/verify-registration", async (req, res) => {
+  const { username, attestationResponse } = req.body;
+  const user = users[username];
+
+  const expectedChallenge = user.currentChallenge;
 
   try {
-    medicalChain.addNewRecord(record, signature, publicKey);
-    res.json({ success: true, message: 'Record added to pending' });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
+    const verification = await verifyRegistrationResponse({
+      response: attestationResponse,
+      expectedChallenge,
+      expectedOrigin: "http://localhost:3000",
+      expectedRPID: "localhost",
+    });
+
+    if (verification.verified) {
+      user.credentials.push(verification.registrationInfo);
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ success: false });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Verification failed" });
   }
-});
-
-app.get('/mine', (req, res) => {
-  medicalChain.minePendingRecords();
-  res.json({
-    success: true,
-    message: 'New block mined',
-    block: medicalChain.getLatestBlock()
-  });
-});
-
-app.get('/chain', (req, res) => {
-  res.json({
-    chain: medicalChain.chain,
-    length: medicalChain.chain.length
-  });
-});
-
-app.get('/validate', (req, res) => {
-  const isValid = medicalChain.isChainValid();
-  res.json({ isValid });
-});
-
-app.post('/node', (req, res) => {
-  const { nodeUrl } = req.body;
-  if (!medicalChain.networkNodes.includes(nodeUrl)) {
-    medicalChain.networkNodes.push(nodeUrl);
-  }
-  res.json({ nodes: medicalChain.networkNodes });
 });
 
 app.listen(port, () => {
-  console.log(`Medical Blockchain running on ${nodeAddress}`);
+  console.log(`Serveur WebAuthn sur http://localhost:${port}`);
 });
