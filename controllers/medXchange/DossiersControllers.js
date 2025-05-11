@@ -212,6 +212,41 @@ const addPatient = async (req, res) => {
   }
 }
 
+const loginpatient = async (req, res) => {
+  try {
+    const { email, mot_de_passe } = req.body;
+    if (!email || !mot_de_passe) {
+      return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
+    }
+    const utilisateur = await query(
+      `SELECT * FROM patient WHERE email = $1`,
+      [email]
+    );
+    if (!utilisateur.rows.length) {
+      return res.status(404).json({ success: false, message: "Patient non trouvé" });
+    }
+    const utilisateurData = utilisateur.rows[0];
+    const motDePasseHash = await bcrypt.compare(mot_de_passe, utilisateurData.password);
+    if (!motDePasseHash) {
+      return res.status(401).json({ success: false, message: "Mot de passe incorrect" });
+    }
+    const token = jwt.sign({ id_patient: utilisateurData.id_patient }, process.env.TOKEN_KEY, { expiresIn: '10d' });
+    const updatetoken = await query(
+      `UPDATE patient SET token = $1 WHERE id_patient = $2`,
+      [token, utilisateurData.id_patient]
+    );
+
+    if (!updatetoken.rows.length) {
+      return res.status(404).json({ success: false, message: "Patient non trouvé" });
+    }
+
+    return res.status(200).json({ success: true, message: "Connexion reussie", utilisateur: utilisateurData, token });
+  } catch (error) {
+    console.error("Erreur lors de la connexion:", error);
+    return res.status(500).json({ success: false, message: "Erreur lors de la connexion" });
+  }
+}
+
 // Configuration de multer pour les PDF
 const storagePdf = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -703,5 +738,6 @@ module.exports = {
   setInactivePersonnel,
   editPersonnel,
   addPersonnel,
-  getPersonnelById
+  getPersonnelById,
+  loginpatient
 };
