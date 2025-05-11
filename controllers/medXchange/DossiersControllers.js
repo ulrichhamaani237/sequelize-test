@@ -4,8 +4,16 @@ const { sendBulkNotifications } = require("./notification");
 const multer = require("multer");
 const path = require("path");
 const bcrypt = require("bcrypt");
+const { createGenesisBlock, addrecordBlockchain, mineNewBlock, validateBlockchain, getBlockchain, registerNode } = require("../../blockchaine/medicalBlockchain");
 
 
+/**
+ * 
+ * @param {*} req 
+ * @param {*} res 
+ * @returns  
+ * 
+ */
 const addPersonnel = async (req, res) => {
   try {
 
@@ -52,6 +60,12 @@ const addPersonnel = async (req, res) => {
   }
 }
 
+/**
+ * @description 
+ * @param {*} req 
+ * @param {*} res 
+ * @returns 
+ */
 const getPersonnelById = async (req, res) => {
   try {
     const id_utilisateur = req.params.id_utilisateur;
@@ -69,6 +83,12 @@ const getPersonnelById = async (req, res) => {
   }
 }
 
+/**
+ * @description edit personnel
+ * @param {*} req 
+ * @param {*} res 
+ * @returns 
+ */
 const editPersonnel = async (req, res) => {
   try {
     const { nom, prenom, email, mot_de_passe_hash, role, specialite, sexe } = req.body;
@@ -126,9 +146,9 @@ const setInactivePersonnel = async (req, res) => {
 
 const addPatient = async (req, res) => {
   try {
-    const { nom, prenom, date_naissance, age, sexe, taille, adresse, nom_tuteur, photo } = req.body;
+    const { nom, prenom, date_naissance, age, sexe, taille, adresse, nom_tuteur, photo, id_utilisateur } = req.body;
     const id_hopital = req.params.id_hopital;  // Au lieu de req.params 
-    if (!id_hopital || !nom || !prenom || !date_naissance || !age || !sexe || !taille || !adresse || !nom_tuteur) {
+    if (!id_hopital || !nom || !prenom || !date_naissance || !age || !sexe || !taille || !adresse || !nom_tuteur || !id_utilisateur) {
       return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
     }
 
@@ -138,6 +158,7 @@ const addPatient = async (req, res) => {
              RETURNING *`,
       [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, sexe, age, taille, photo]
     );
+
 
     if (!patient.rows.length) {
       return res.status(404).json({ success: false, message: "Patient non trouvé" });
@@ -154,7 +175,37 @@ const addPatient = async (req, res) => {
       return res.status(404).json({ success: false, message: "Dossier non trouvé" });
     }
 
-    return res.status(201).json({ success: true, message: "Patient ajouté avec succès", patient: patient.rows[0], dossier: dossier.rows[0] });
+  const detail = {
+    motif: "",
+  };
+  const jsonDetail = JSON.stringify(detail);
+  
+  // Vérifiez d'abord si le dossier existe
+  if (!dossier.rows.length) {
+    return res.status(404).json({ success: false, message: "Dossier non trouvé" });
+  }
+  
+  // Insérez la consultation
+  const consultation = await query(
+    `INSERT INTO consultation(id_dossier, id_utilisateur, date_consultation, detail) 
+     VALUES ($1, $2, $3, $4) 
+     RETURNING *`,
+    [dossier.rows[0].id_dossier, id_utilisateur, new Date(), jsonDetail]
+  );
+  
+  // Vérifiez si la consultation a été créée
+  if (!consultation.rows.length) {
+    return res.status(404).json({ success: false, message: "Consultation non créée" });
+  }
+  
+  // Si tout est bon, retournez une réponse de succès
+  return res.status(201).json({
+    success: true,
+    message: "Patient ajouté avec succès",
+    patient: patient.rows[0],
+    dossier: dossier.rows[0],
+    consultation: consultation.rows[0]
+  });
   } catch (error) {
     console.error("Erreur lors de l'ajout du patient:", error);
     return res.status(500).json({ success: false, message: "Erreur lors de l'ajout du patient" });
@@ -477,27 +528,54 @@ const deleteDossier = async (req, res) => {
 
 }
 
+/**
+ * @description delete patient
+ * @param {*} req 
+ * @param {*} res 
+ * @returns 
+ */
 const deletePatient = async (req, res) => {
-  const { id_patient } = req.body;
-
   try {
-    const patient = await query(
-      `DELETE FROM patient WHERE id_patient = $1`,
+    const { id_patient } = req.body;
+    
+    // D'abord récupérer le dossier médical associé
+    const dossier = await query(
+      `SELECT id_dossier FROM dossier_medical_global WHERE id_patient = $1`,
       [id_patient]
     );
-    return res.status(200).json({
-      success: true,
-      message: "Patient supprimé avec succès"
-    });
+
+    if (dossier.rows.length > 0) {
+      const id_dossier = dossier.rows[0].id_dossier;
+      
+      // Supprimer les consultations associées
+      await query(
+        `DELETE FROM consultation WHERE id_dossier = $1`,
+        [id_dossier]
+      );
+      
+      // Ensuite supprimer le dossier médical
+      await query(
+        `DELETE FROM dossier_medical_global WHERE id_dossier = $1`,
+        [id_dossier]
+      );
+    }
+
+    // Enfin supprimer le patient
+    const result = await query(
+      `DELETE FROM patient WHERE id_patient = $1 RETURNING *`,
+      [id_patient]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: "Patient non trouvé" });
+    }
+
+    return res.status(200).json({ success: true, message: "Patient supprimé avec succès" });
   } catch (error) {
     console.error("Erreur lors de la suppression du patient:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Erreur serveur lors de la suppression du patient"
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
-
-}
+};
 
 const deleteConsultation = async (req, res) => {
   const { id_consultation } = req.body;

@@ -1,0 +1,43 @@
+# POST http://localhost:5000/register HTTP/1.1
+# Content-Type: application/json
+
+# {
+#   "nom": "John",
+#   "prenom": "Doe",
+#   "email": "john@example.com",
+#   "mot_de_passe": "123456",
+#   "role": "medecin",
+#   "id_hopital": 1
+# }
+
+// api pour la creation d un hopitale! 
+
+# POST http://localhost:5000/dossier/addhopitale HTTP/1.1
+# Content-Type: application/json
+
+# {
+#   "nom": "Hopital C",
+#   "adresse": "123 Rue de l'Hopital V",
+#   "type_hopitale": "Hopital",
+#   "autres_donnees": "Donnees supplementaires",
+#   "politique_gestion": "Politique de gestion"
+# }
+
+// api pour la creation d un personnel!
+
+POST http://localhost:5000/dossier/register HTTP/1.1
+Content-Type: application/json
+
+{
+  "nom": "John2",
+  "prenom": "Doe2",
+  "email": "john2@example.com",
+  "mot_de_passe": "aaaaaaaa",
+  "role": "medecin",
+  "id_hopital": "147",
+  "autre_donnees": {
+    "info": "autre donnzz"
+  }
+}
+
+GET http://localhost:5000/dossier/getall

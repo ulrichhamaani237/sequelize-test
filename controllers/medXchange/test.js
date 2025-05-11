@@ -2,7 +2,6 @@ require('dotenv').config();
 const { query } = require('../../config/db');
 const bcrypt = require('bcrypt');
 const xlsx = require('xlsx');
-const crypto = require('crypto');
 const upload = require('../../uploads/uploadProfess');
 const { envoyerNotificationUtilisateur } = require('../../controllers/medXchange/notification')
 const jwt = require('jsonwebtoken');
@@ -10,6 +9,11 @@ const fs = require('fs');
 const { genererCleAccesUnifiee } = require('../../helpers/generateKey');
 const { addLogs } = require('./LogsControllers');
 const path = require('path');
+const EC = require("elliptic").ec;
+const crypto = require("crypto");
+const SHA256 = require("crypto-js/sha256");
+const { createGenesisBlock, addrecordBlockchain, mineNewBlock, validateBlockchain, getBlockchain, registerNode } = require("../../blockchaine/medicalBlockchain");
+const ec = new EC("secp256k1"); // Courbe utilisée par Bitcoin et Ethereum
 
 const getPatientAutorizeHopitale = async (req, res) => {
 
@@ -95,35 +99,51 @@ const getAllDataTables = async (req, res) => {
     }
 };
 
+
+
+
 const registerUtilisateur = async (req, res) => {
     const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
-
-
-    // Validation des champs       
+    
+    const getAllHopitals = await query('SELECT blockchain_node_url FROM hopital WHERE id_hopital = $1', [id_hopital]);
+    const blockchain_node_url = getAllHopitals.rows[0].blockchain_node_url;
+    
     try {
         // Hachage du mot de passe
         const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
 
-        // Génération du token initial
-        // const token = jwt.sign({ id_utilisateur: null }, process.env.TOKEN_KEY, { expiresIn: '10d' });
+        // Générer la paire de clés ECDSA pour la blockchain
+        const keyPair = ec.genKeyPair();
+        const publicKey = keyPair.getPublic("hex");
+        const privateKey = keyPair.getPrivate("hex");
 
-        // Requête SQL corrigée (vérifiez que les noms de colonnes correspondent à votre schéma de base)
+        // Chiffrement de la clé privée avec le mot de passe
+        const salt = crypto.randomBytes(16); // Génère un sel aléatoire
+        const key = await new Promise((resolve, reject) => {
+            crypto.scrypt(mot_de_passe, salt, 32, (err, derivedKey) => {
+                if (err) reject(err);
+                resolve(derivedKey);
+            });
+        });
+
+        const iv = crypto.randomBytes(16); // Génère un vecteur d'initialisation aléatoire
+        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        let encryptedPrivateKey = cipher.update(privateKey, 'utf8', 'hex');
+        encryptedPrivateKey += cipher.final('hex');
+
+        // Stocker le sel, le vecteur d'initialisation et la clé chiffrée
+        const encryptedData = salt.toString('hex') + ':' + iv.toString('hex') + ':' + encryptedPrivateKey;
+
+        // Insertion de l'utilisateur avec les clés
         const sql = `
             INSERT INTO utilisateur(
-                nom, 
-                prenom, 
-                email, 
-                mot_de_passe_hash,  
-                role, 
-                id_hopital, 
-                autre_donnees
-            ) VALUES($1, $2, $3, $4, $5, $6, $7) 
-            RETURNING id_utilisateur, nom, email, role, token
+                nom, prenom, email, mot_de_passe_hash,
+                role, id_hopital, blockchain_node_url, autre_donnees,
+                cle_publique, cle_prive
+            ) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id_utilisateur, nom, email, role
         `;
 
-
-
-        // Utilisation correcte de db.query (assurez-vous que db est bien importé/configuré)
         const { rows } = await query(sql, [
             nom,
             prenom,
@@ -131,7 +151,10 @@ const registerUtilisateur = async (req, res) => {
             motDePasseHash,
             role,
             id_hopital,
-            autre_donnees || null, // Gestion de la valeur NULL si autre_donnees est vide
+            blockchain_node_url,
+            autre_donnees || null,
+            publicKey,
+            encryptedData
         ]);
 
         if (rows.length === 0) {
@@ -140,7 +163,7 @@ const registerUtilisateur = async (req, res) => {
 
         const newUser = rows[0];
 
-        // MAINTENANT générer le token valide
+        // Génération du token JWT
         const token = jwt.sign(
             {
                 id_utilisateur: newUser.id_utilisateur,
@@ -151,35 +174,34 @@ const registerUtilisateur = async (req, res) => {
             { expiresIn: '30d' }
         );
 
-        // Mettre à jour en base
+        // Sauvegarde du token
         await query(
             'UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2',
             [token, newUser.id_utilisateur]
         );
 
-        // Renvoyer le BON token
+        // Réponse au client
         res.status(201).json({
             success: true,
-            user: {
+            message: "Utilisateur enregistré avec succès et clés blockchain générées",
+            utilisateur: {
                 ...newUser,
+                cle_publique: publicKey
             },
-            token: token
+            token
         });
 
     } catch (error) {
         console.error("Erreur lors de l'inscription:", error);
 
-        // Gestion spécifique des erreurs PostgreSQL
-        if (error.code === '42703') { // Erreur de colonne inexistante
+        if (error.code === '42703') {
             return res.status(500).json({
-                error: "Erreur de configuration de la base de données",
-                details: "Une colonne spécifiée n'existe pas dans la table",
+                error: "Erreur de configuration de la base de données (colonne manquante)",
                 success: false
             });
-        } else if (error.code === '23505') { // Violation de contrainte unique (email déjà existant)
+        } else if (error.code === '23505') {
             return res.status(409).json({
-                error: "cette Email existe deja",
-                details: "Une colonne spécifiée n'existe pas dans la table",
+                error: "Email déjà utilisé",
                 success: false
             });
         }
@@ -191,6 +213,7 @@ const registerUtilisateur = async (req, res) => {
         });
     }
 };
+
 
 const refreshToken = async (req, res) => {
     const { token, id_user } = req.body
@@ -779,16 +802,17 @@ const importDossierMedicaleFromExcel = async (req, res) => {
 };
 
 
+
 const createPersonnelHopital = async (req, res) => {
     const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
 
-    // Validation des champs obligatoires
     if (!nom || !prenom || !email || !mot_de_passe || !id_hopital || !role || !autre_donnees) {
         return res.status(400).json({ error: "Tous les champs sont requis" });
     }
 
+    
+
     try {
-        // Vérifier si l'hôpital existe
         const hopitalResult = await query(
             'SELECT * FROM hopital WHERE id_hopital = $1',
             [id_hopital]
@@ -801,31 +825,57 @@ const createPersonnelHopital = async (req, res) => {
         // Générer le hash du mot de passe
         const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
 
-        // Insertion du personnel
+        // Générer une paire de clés ECDSA
+        const keyPair = ec.genKeyPair();
+        const publicKey = keyPair.getPublic("hex");
+        const privateKey = keyPair.getPrivate("hex");
+
+        // Chiffrer la clé privée avec un mot de passe (AES-256)
+        const salt = crypto.randomBytes(16); // Génère un sel aléatoire
+        const key = await new Promise((resolve, reject) => {
+            crypto.scrypt(mot_de_passe, salt, 32, (err, derivedKey) => {
+                if (err) reject(err);
+                resolve(derivedKey);
+            });
+        });
+
+        const iv = crypto.randomBytes(16); // Génère un vecteur d'initialisation aléatoire
+        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        let encryptedPrivateKey = cipher.update(privateKey, 'utf8', 'hex');
+        encryptedPrivateKey += cipher.final('hex');
+
+        // Stocker le sel, le vecteur d'initialisation et la clé chiffrée
+        const encryptedData = salt.toString('hex') + ':' + iv.toString('hex') + ':' + encryptedPrivateKey;
+
+        // Insertion de l'utilisateur + clé publique/privée chiffrée
         const result = await query(
-            'INSERT INTO utilisateur(nom, prenom, email, mot_de_passe, role, id_hopital,autre_donnees) VALUES($1, $2, $3, $4, $5) RETURNING *',
-            [nom, prenom, email, motDePasseHash, role, id_hopital, autre_donnees]
+            'INSERT INTO utilisateur(noms, prenomhj, email, mot_de_passe, role, id_hopital, autre_donnees, cle_publique, cle_prive, blockchain_node_url) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+            [nom, prenom, email, motDePasseHash, role, id_hopital, autre_donnees, publicKey, encryptedData, hopitalResult.rows[0].blockchain_node_url]
         );
 
         if (result.rows.length === 0) {
             return res.status(500).json({ error: "Échec de l'insertion du personnel" });
         }
 
-        return res.status(201).json(result.rows[0]);
+        return res.status(201).json({
+            utilisateur: result.rows[0],
+            message: "Utilisateur créé avec clés de sécurité pour la blockchain"
+        });
 
     } catch (error) {
         console.error("Erreur SQL:", error);
-        return res.status(500).json({
-            error: "Erreur serveur",
-            details: error.message
-        });
+        return res.status(500).json({ error: "Erreur serveur", details: error.message });
     }
-
-}
+};
 
 const createHopital = async (req, res) => {
 
     const { nom, adresse, type_hopitale, autres_donnees } = req.body;
+    const basePort = 5000
+    const getAllHopitals = await query('SELECT * FROM hopital');
+    const index = getAllHopitals.rows.length;
+
+    const blockchain_node_url = `http://localhost:${basePort + index}`;
 
     // Validation des champs obligatoires
     if (!nom || !adresse) {
@@ -835,8 +885,8 @@ const createHopital = async (req, res) => {
     try {
         // Insertion de l'hôpital
         const result = await query(
-            'INSERT INTO hopital(nom, adresse,politique_gestion) VALUES($1, $2, $3) RETURNING *',
-            [nom, adresse, autres_donnees]
+            'INSERT INTO hopital(nom, adresse,politique_gestion,blockchain_node_url) VALUES($1, $2, $3,$4) RETURNING *',
+            [nom, adresse, autres_donnees, blockchain_node_url]
         );
 
         if (result.rows.length === 0) {
@@ -903,8 +953,8 @@ const AjouterTraitement = async (req, res) => {
 
 const AjouterConsultation = async (req, res) => {
     const { id_dossier, id_utilisateur, detail } = req.body;
-    const image = req.file ;
-    const pdfCarnet = req.file ;
+    const image = req.file;
+    const pdfCarnet = req.file;
 
 
     // Validation des champs obligatoires
@@ -971,34 +1021,34 @@ const AjouterConsultation = async (req, res) => {
                 error: 'Échec de l\'insertion de la consultation'
             });
         }
-  
+
         // Ajouter les logs
         try {
-          const resultLog = await addLogs({
-            id_dossier: id_dossier,
-            id_hopital: resultatSelect.rows[0].id_hopital, 
-            id_utilisateur: id_utilisateur,
-            date_acces: new Date(),
-            type_action: 'insert',
-            operation_type: 'consultation',
-            dossier_username: resultatSelect.rows[0].nom,
-            target_type: 'consultation',
-            details: result.rows[0].detail
-          });
+            const resultLog = await addLogs({
+                id_dossier: id_dossier,
+                id_hopital: resultatSelect.rows[0].id_hopital,
+                id_utilisateur: id_utilisateur,
+                date_acces: new Date(),
+                type_action: 'insert',
+                operation_type: 'consultation',
+                dossier_username: resultatSelect.rows[0].nom,
+                target_type: 'consultation',
+                details: result.rows[0].detail
+            });
 
-          return res.status(201).json({
-            success: true,
-            message: 'Consultation ajoutée avec succès',
-            data: result.rows[0],
-            log: resultLog
-          });
+            return res.status(201).json({
+                success: true,
+                message: 'Consultation ajoutée avec succès',
+                data: result.rows[0],
+                log: resultLog
+            });
         } catch (error) {
-          console.error("Erreur lors de l'ajout des logs:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Erreur lors de l'enregistrement des logs",
-            error: error.message
-          });
+            console.error("Erreur lors de l'ajout des logs:", error);
+            return res.status(500).json({
+                success: false,
+                message: "Erreur lors de l'enregistrement des logs",
+                error: error.message
+            });
         }
     } catch (error) {
         console.error("Erreur SQL:", error);
@@ -1033,7 +1083,7 @@ const AjouterDiagnostic = async (req, res) => {
 
 
         // Ajouter les logs
-      const resultLog = await addLogs({
+        const resultLog = await addLogs({
             id_dossier: id_dossier,
             id_utilisateur: id_utilisateur,
             date_acces: new Date(),
@@ -1082,7 +1132,7 @@ const AjouterOrdonnance = async (req, res) => {
         }
 
         // Ajouter les logs
-      const resultLog = await addLogs({
+        const resultLog = await addLogs({
             id_dossier: id_dossier,
             id_utilisateur: id_utilisateur,
             date_acces: new Date(),
@@ -1131,7 +1181,7 @@ const AjouterResultat = async (req, res) => {
         }
 
         // Ajouter les logs
-      const resultLog = await addLogs({
+        const resultLog = await addLogs({
             id_dossier: id_dossier,
             id_utilisateur: id_utilisateur,
             date_acces: new Date(),
@@ -1180,7 +1230,7 @@ const AjouterHospitalisation = async (req, res) => {
         }
 
         // Ajouter les logs
-      const resultLog = await addLogs({
+        const resultLog = await addLogs({
             id_dossier: id_dossier,
             id_utilisateur: id_utilisateur,
             date_acces: new Date(),
