@@ -1,9 +1,7 @@
 const mongoose = require("mongoose");
 
 // Connexion à MongoDB
-mongoose.connect("mongodb://localhost:27017/medicalchain", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+mongoose.connect("mongodb+srv://ulrich_dev:+237Ulrich@cluster0.yozxkoq.mongodb.net/medicalchain", {
 });
 
 // Schéma des blocs de la blockchain
