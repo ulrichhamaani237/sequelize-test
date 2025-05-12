@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 // Connexion à MongoDB
 mongoose.connect("mongodb+srv://ulrich_dev:+237Ulrich@cluster0.yozxkoq.mongodb.net/medicalchain", {
+  ssl: true,
 });
 
 // Schéma des blocs de la blockchain
