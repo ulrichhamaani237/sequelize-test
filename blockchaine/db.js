@@ -1,9 +1,18 @@
 const mongoose = require("mongoose");
 
-// Connexion à MongoDB
-mongoose.connect("mongodb+srv://ulrich_dev:+237Ulrich@cluster0.yozxkoq.mongodb.net/medicalchain", {
+
+
+// Encodez le caractère spécial '@' dans le mot de passe
+const DB_URI = "mongodb+srv://ulrich_dev:%2B237Ulrich@cluster0.yozxkoq.mongodb.net/medicalchain?retryWrites=true&w=majority";
+
+mongoose.connect(DB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
   ssl: true,
-});
+  tlsAllowInvalidCertificates: false // À n'utiliser qu'en développement
+})
+.then(() => console.log('Connexion MongoDB réussie ✅'))
+.catch(err => console.error('Erreur de connexion ❌:', err.message));
 
 // Schéma des blocs de la blockchain
 const BlockSchema = new mongoose.Schema({
