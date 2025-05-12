@@ -64,4 +64,30 @@
 #   "tel": "+237 620410454"
 # }
 
-GET https://medxchange-backend.onrender.com/dossier/patient-for-search
+# /
+# POST https://medxchange-backend.onrender.com/dossier/login
+# Content-Type: application/json
+
+# {
+#   "email": "john@example.com",
+#   "mot_de_passe": "aaaaaaaa"
+# }
+
+POST http://localhost:5000/dossier/addpatient/148
+Content-Type: application/json
+
+{
+  "nom": "marcel",
+  "prenom": "samia",
+  "date_naissance": "2004-01-01",
+  "age": "18",
+  "sexe": "Masculin",
+  "taille": "180",
+  "adresse": "123 Rue de l'Hopital V",
+  "nom_tuteur": "Tuteur2",
+  "photo": "photo2.jpg",
+  "id_utilisateur": "182",
+  "mot_de_passe": "aaaaaaaa",
+  "tel": "+237620410454",
+  "email": "ulrichhaman@gmail.com"
+}

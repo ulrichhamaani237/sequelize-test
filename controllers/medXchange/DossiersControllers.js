@@ -159,130 +159,78 @@ const setInactivePersonnel = async (req, res) => {
 const addPatient = async (req, res) => {
   try {
     const {
-      nom, prenom, date_naissance, age, sexe, taille,
-      adresse, nom_tuteur, photo, id_utilisateur, mot_de_passe,tel
+      nom, prenom, date_naissance, age, sexe, taille, email,
+      adresse, nom_tuteur, photo, id_utilisateur, mot_de_passe, tel
     } = req.body;
 
-    const id_hopital = req.params.id_hopital;
+    console.log("req.body:", req.body);
+    console.log("req.params:", req.params);
 
-    if (!id_hopital || !nom || !prenom || !date_naissance || !age || !sexe || !taille || !adresse || !nom_tuteur || !id_utilisateur || !mot_de_passe || !tel) {
-      return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
+
+    // Vérification des champs obligatoires
+    const requiredFields = {
+      id_hopital: req.params.id_hopital,
+      nom, prenom, date_naissance, age, sexe, 
+      taille, adresse, nom_tuteur, id_utilisateur, 
+      mot_de_passe, tel, email
+    };
+
+    // Vérifier si tous les champs requis sont présents
+    const missingFields = Object.entries(requiredFields)
+      .filter(([_, value]) => value === undefined || value === null || value === '')
+      .map(([key]) => key);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Champs manquants: ${missingFields.join(', ')}` 
+      });
     }
 
-    // Étape 1 : Créer le patient
+    // Vérifier si l'utilisateur existe
+    const userCheck = await query('SELECT id_utilisateur FROM utilisateur WHERE id_utilisateur = $1', [id_utilisateur]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "L'utilisateur spécifié n'existe pas"
+      });
+    }
+
+    // Hachage du mot de passe
+    const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
+
+    // Insertion du patient
     const patient = await query(
-      `INSERT INTO patient (nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, sexe, age, taille, photo,tel)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
+      `INSERT INTO patient 
+       (nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, 
+        sexe, age, taille, photo, tel, email, password)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
-      [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, sexe, age, taille, photo,tel]
+      [
+        nom, prenom, date_naissance, nom_tuteur, req.params.id_hopital, 
+        adresse, sexe, age, taille, photo, tel, email, hashedPassword
+      ]
     );
 
     if (!patient.rows.length) {
-      return res.status(404).json({ success: false, message: "Patient non trouvé" });
-    }
-
-    const id_patient = patient.rows[0].id_patient;
-
-    // Étape 2 : Créer le dossier médical
-    const dossier = await query(
-      `INSERT INTO dossier_medical_global (id_patient, id_hopital, date_creation)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [id_patient, id_hopital, new Date()]
-    );
-
-    if (!dossier.rows.length) {
-      return res.status(404).json({ success: false, message: "Dossier non trouvé" });
-    }
-
-    const id_dossier = dossier.rows[0].id_dossier;
-
-    // Étape 3 : Créer la consultation vide
-    const detail = { 
-      motif: "",
-      date_creation: new Date()
-     };
-    const jsonDetail = JSON.stringify(detail);
-
-    const consultation = await query(
-      `INSERT INTO consultation(id_dossier, id_utilisateur, date_consultation, detail)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [id_dossier, id_utilisateur, new Date(), jsonDetail]
-    );
-
-    if (!consultation.rows.length) {
-      return res.status(404).json({ success: false, message: "Consultation non créée" });
-    }
-
-    // Étape 4 : Récupérer les clés de l'utilisateur
-    const utilisateurResult = await query(
-      `SELECT cle_publique, cle_prive FROM utilisateur WHERE id_utilisateur = $1`,
-      [id_utilisateur]
-    );
-
-    if (!utilisateurResult.rows.length) {
-      return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
-    }
-
-    const { cle_publique, cle_prive } = utilisateurResult.rows[0];
-
-    // Déchiffrement de la clé privée
-    const [saltHex, ivHex, encryptedPrivateKeyHex] = cle_prive.split(":");
-    const salt = Buffer.from(saltHex, "hex");
-    const iv = Buffer.from(ivHex, "hex");
-    const encryptedPrivateKey = encryptedPrivateKeyHex;
-
-    const derivedKey = await new Promise((resolve, reject) => {
-      crypto.scrypt(mot_de_passe, salt, 32, (err, key) => {
-        if (err) reject(err);
-        else resolve(key);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Erreur lors de la création du patient" 
       });
-    });
-
-    const decipher = crypto.createDecipheriv("aes-256-cbc", derivedKey, iv);
-    let decryptedPrivateKey = decipher.update(encryptedPrivateKey, "hex", "utf8");
-    decryptedPrivateKey += decipher.final("utf8");
-
-    // Étape 5 : Initialiser la blockchain
-    await createGenesisBlock();
-
-    const dossierMedical = {
-      id_dossier,
-      id_patient,
-      id_hopital,
-      date_creation: new Date(),
-      initial_consultation: detail
-    };
-
-    const dataStr = JSON.stringify(dossierMedical);
-    const dataHash = SHA256(dataStr).toString();
-
-    const key = ec.keyFromPrivate(decryptedPrivateKey, "hex");
-    const signature = key.sign(dataHash).toDER("hex");
-
-    const aesSecret = SHA256(cle_publique).toString(); // Secret symétrique pour le chiffrement
-
-    // Étape 6 : Ajouter à la blockchain
-    const blockchainResponse = await addrecordBlockchain(dossierMedical, signature, cle_publique, aesSecret);
-
-    if (blockchainResponse.error) {
-      return res.status(500).json({ success: false, message: "Erreur Blockchain", error: blockchainResponse.error });
     }
 
-    // Succès
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
-      message: "Patient ajouté avec blockchain initialisée",
-      patient: patient.rows[0],
-      dossier: dossier.rows[0],
-      consultation: consultation.rows[0],
-      blockchain: blockchainResponse
+      data: patient.rows[0]
     });
 
   } catch (error) {
     console.error("Erreur lors de l'ajout du patient:", error);
-    return res.status(500).json({ success: false, message: "Erreur serveur", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Erreur serveur",
+      error: error.message // Afficher le message d'erreur complet pour le débogage
+    });
   }
 };
 
