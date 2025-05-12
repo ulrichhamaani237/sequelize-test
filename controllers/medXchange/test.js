@@ -15,6 +15,8 @@ const SHA256 = require("crypto-js/sha256");
 const { createGenesisBlock, addrecordBlockchain, mineNewBlock, validateBlockchain, getBlockchain, registerNode } = require("../../blockchaine/medicalBlockchain");
 const ec = new EC("secp256k1"); // Courbe utilisée par Bitcoin et Ethereum
 
+
+
 const getPatientAutorizeHopitale = async (req, res) => {
 
     try {
@@ -103,115 +105,117 @@ const getAllDataTables = async (req, res) => {
 
 
 const registerUtilisateur = async (req, res) => {
-    const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
-    
-    const getAllHopitals = await query('SELECT blockchain_node_url FROM hopital WHERE id_hopital = $1', [id_hopital]);
-    const blockchain_node_url = getAllHopitals.rows[0].blockchain_node_url;
-    
-    try {
-        // Hachage du mot de passe
-        const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
+  const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
 
-        // Générer la paire de clés ECDSA pour la blockchain
-        const keyPair = ec.genKeyPair();
-        const publicKey = keyPair.getPublic("hex");
-        const privateKey = keyPair.getPrivate("hex");
+  try {
+    // Récupération de l'URL du nœud blockchain de l'hôpital
+    const getAllHopitals = await query(
+      "SELECT blockchain_node_url FROM hopital WHERE id_hopital = $1",
+      [id_hopital]
+    );
 
-        // Chiffrement de la clé privée avec le mot de passe
-        const salt = crypto.randomBytes(16); // Génère un sel aléatoire
-        const key = await new Promise((resolve, reject) => {
-            crypto.scrypt(mot_de_passe, salt, 32, (err, derivedKey) => {
-                if (err) reject(err);
-                resolve(derivedKey);
-            });
-        });
-
-        const iv = crypto.randomBytes(16); // Génère un vecteur d'initialisation aléatoire
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-        let encryptedPrivateKey = cipher.update(privateKey, 'utf8', 'hex');
-        encryptedPrivateKey += cipher.final('hex');
-
-        // Stocker le sel, le vecteur d'initialisation et la clé chiffrée
-        const encryptedData = salt.toString('hex') + ':' + iv.toString('hex') + ':' + encryptedPrivateKey;
-
-        // Insertion de l'utilisateur avec les clés
-        const sql = `
-            INSERT INTO utilisateur(
-                nom, prenom, email, mot_de_passe_hash,
-                role, id_hopital, blockchain_node_url, autre_donnees,
-                cle_publique, cle_prive
-            ) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING id_utilisateur, nom, email, role
-        `;
-
-        const { rows } = await query(sql, [
-            nom,
-            prenom,
-            email,
-            motDePasseHash,
-            role,
-            id_hopital,
-            blockchain_node_url,
-            autre_donnees || null,
-            publicKey,
-            encryptedData
-        ]);
-
-        if (rows.length === 0) {
-            return res.status(500).json({ error: "Échec de l'insertion de l'utilisateur" });
-        }
-
-        const newUser = rows[0];
-
-        // Génération du token JWT
-        const token = jwt.sign(
-            {
-                id_utilisateur: newUser.id_utilisateur,
-                email: newUser.email,
-                role: newUser.role
-            },
-            process.env.TOKEN_KEY,
-            { expiresIn: '30d' }
-        );
-
-        // Sauvegarde du token
-        await query(
-            'UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2',
-            [token, newUser.id_utilisateur]
-        );
-
-        // Réponse au client
-        res.status(201).json({
-            success: true,
-            message: "Utilisateur enregistré avec succès et clés blockchain générées",
-            utilisateur: {
-                ...newUser,
-                cle_publique: publicKey
-            },
-            token
-        });
-
-    } catch (error) {
-        console.error("Erreur lors de l'inscription:", error);
-
-        if (error.code === '42703') {
-            return res.status(500).json({
-                error: "Erreur de configuration de la base de données (colonne manquante)",
-                success: false
-            });
-        } else if (error.code === '23505') {
-            return res.status(409).json({
-                error: "Email déjà utilisé",
-                success: false
-            });
-        }
-
-        res.status(500).json({
-            error: "Erreur serveur",
-            details: error.message,
-            success: false
-        });
+    if (getAllHopitals.rows.length === 0) {
+      return res.status(404).json({ error: "Hôpital non trouvé" });
     }
+
+    const blockchain_node_url = getAllHopitals.rows[0].blockchain_node_url;
+
+    // Hachage du mot de passe
+    const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
+
+    // Génération de la paire de clés ECDSA
+    const keyPair = ec.genKeyPair();
+    const publicKey = keyPair.getPublic("hex");
+    const privateKey = keyPair.getPrivate("hex");
+
+    // Chiffrement de la clé privée avec AES-256
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(16);
+    const derivedKey = crypto.scryptSync(mot_de_passe, salt, 32); // Clé dérivée synchronement
+
+    const cipher = crypto.createCipheriv("aes-256-cbc", derivedKey, iv);
+    let encryptedPrivateKey = cipher.update(privateKey, "utf8", "hex");
+    encryptedPrivateKey += cipher.final("hex");
+
+    const encryptedData = `${salt.toString("hex")}:${iv.toString("hex")}:${encryptedPrivateKey}`;
+
+    // Insertion de l'utilisateur
+    const sql = `
+      INSERT INTO utilisateur (
+        nom, prenom, email, mot_de_passe_hash,
+        role, id_hopital, blockchain_node_url, autre_donnees,
+        cle_publique, cle_prive
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id_utilisateur, nom, email, role
+    `;
+
+    const { rows } = await query(sql, [
+      nom,
+      prenom,
+      email,
+      motDePasseHash,
+      role,
+      id_hopital,
+      blockchain_node_url,
+      autre_donnees || null,
+      publicKey,
+      encryptedData,
+    ]);
+
+    if (rows.length === 0) {
+      return res.status(500).json({ error: "Échec de l'insertion de l'utilisateur" });
+    }
+
+    const newUser = rows[0];
+
+    // Création du token JWT
+    const token = jwt.sign(
+      {
+        id_utilisateur: newUser.id_utilisateur,
+        email: newUser.email,
+        role: newUser.role,
+      },
+      process.env.TOKEN_KEY,
+      { expiresIn: "30d" }
+    );
+
+    // Sauvegarde du token dans la BDD
+    await query("UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2", [
+      token,
+      newUser.id_utilisateur,
+    ]);
+
+    // Réponse
+    res.status(201).json({
+      success: true,
+      message: "Utilisateur enregistré avec succès et clés blockchain générées",
+      utilisateur: {
+        ...newUser,
+        cle_publique: publicKey,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error("Erreur lors de l'inscription:", error);
+
+    if (error.code === "42703") {
+      return res.status(500).json({
+        error: "Erreur de configuration de la base de données (colonne manquante)",
+        success: false,
+      });
+    } else if (error.code === "23505") {
+      return res.status(409).json({
+        error: "Email déjà utilisé",
+        success: false,
+      });
+    }
+
+    res.status(500).json({
+      error: "Erreur serveur",
+      details: error.message,
+      success: false,
+    });
+  }
 };
 
 
@@ -802,71 +806,76 @@ const importDossierMedicaleFromExcel = async (req, res) => {
 };
 
 
-
 const createPersonnelHopital = async (req, res) => {
-    const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
+  const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
 
-    if (!nom || !prenom || !email || !mot_de_passe || !id_hopital || !role || !autre_donnees) {
-        return res.status(400).json({ error: "Tous les champs sont requis" });
+  if (!nom || !prenom || !email || !mot_de_passe || !id_hopital || !role || !autre_donnees) {
+    return res.status(400).json({ error: "Tous les champs sont requis" });
+  }
+
+  try {
+    const hopitalResult = await query(
+      "SELECT * FROM hopital WHERE id_hopital = $1",
+      [id_hopital]
+    );
+
+    if (hopitalResult.rows.length === 0) {
+      return res.status(404).json({ error: "Hôpital non trouvé" });
     }
 
-    
+    // 1. Hacher le mot de passe
+    const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
 
-    try {
-        const hopitalResult = await query(
-            'SELECT * FROM hopital WHERE id_hopital = $1',
-            [id_hopital]
-        );
+    // 2. Générer paire de clés ECDSA
+    const keyPair = EC.genKeyPair();
+    const publicKey = keyPair.getPublic("hex");
+    const privateKey = keyPair.getPrivate("hex");
 
-        if (hopitalResult.rows.length === 0) {
-            return res.status(404).json({ error: "Hôpital non trouvé" });
-        }
+    // 3. Chiffrer la clé privée avec AES-256
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(16);
 
-        // Générer le hash du mot de passe
-        const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
+    const derivedKey = crypto.scryptSync(mot_de_passe, salt, 32); // clé dérivée
+    const cipher = crypto.createCipheriv("aes-256-cbc", derivedKey, iv);
+    let encryptedPrivateKey = cipher.update(privateKey, "utf8", "hex");
+    encryptedPrivateKey += cipher.final("hex");
 
-        // Générer une paire de clés ECDSA
-        const keyPair = ec.genKeyPair();
-        const publicKey = keyPair.getPublic("hex");
-        const privateKey = keyPair.getPrivate("hex");
+    const encryptedData = `${salt.toString("hex")}:${iv.toString("hex")}:${encryptedPrivateKey}`;
 
-        // Chiffrer la clé privée avec un mot de passe (AES-256)
-        const salt = crypto.randomBytes(16); // Génère un sel aléatoire
-        const key = await new Promise((resolve, reject) => {
-            crypto.scrypt(mot_de_passe, salt, 32, (err, derivedKey) => {
-                if (err) reject(err);
-                resolve(derivedKey);
-            });
-        });
+    // 4. Insertion dans la base de données
+    const result = await query(
+      `INSERT INTO utilisateur (
+        noms, prenomhj, email, mot_de_passe, role, id_hopital, autre_donnees,
+        cle_publique, cle_prive, blockchain_node_url
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [
+        nom,
+        prenom,
+        email,
+        motDePasseHash,
+        role,
+        id_hopital,
+        autre_donnees,
+        publicKey,
+        encryptedData,
+        hopitalResult.rows[0].blockchain_node_url,
+      ]
+    );
 
-        const iv = crypto.randomBytes(16); // Génère un vecteur d'initialisation aléatoire
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-        let encryptedPrivateKey = cipher.update(privateKey, 'utf8', 'hex');
-        encryptedPrivateKey += cipher.final('hex');
-
-        // Stocker le sel, le vecteur d'initialisation et la clé chiffrée
-        const encryptedData = salt.toString('hex') + ':' + iv.toString('hex') + ':' + encryptedPrivateKey;
-
-        // Insertion de l'utilisateur + clé publique/privée chiffrée
-        const result = await query(
-            'INSERT INTO utilisateur(noms, prenomhj, email, mot_de_passe, role, id_hopital, autre_donnees, cle_publique, cle_prive, blockchain_node_url) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-            [nom, prenom, email, motDePasseHash, role, id_hopital, autre_donnees, publicKey, encryptedData, hopitalResult.rows[0].blockchain_node_url]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(500).json({ error: "Échec de l'insertion du personnel" });
-        }
-
-        return res.status(201).json({
-            utilisateur: result.rows[0],
-            message: "Utilisateur créé avec clés de sécurité pour la blockchain"
-        });
-
-    } catch (error) {
-        console.error("Erreur SQL:", error);
-        return res.status(500).json({ error: "Erreur serveur", details: error.message });
+    if (result.rows.length === 0) {
+      return res.status(500).json({ error: "Échec de l'insertion du personnel" });
     }
+
+    return res.status(201).json({
+      utilisateur: result.rows[0],
+      message: "Utilisateur créé avec clés de sécurité pour la blockchain",
+    });
+  } catch (error) {
+    console.error("Erreur SQL:", error);
+    return res.status(500).json({ error: "Erreur serveur", details: error.message });
+  }
 };
+
 
 const createHopital = async (req, res) => {
 

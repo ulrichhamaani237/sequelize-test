@@ -1,13 +1,16 @@
-# POST http://localhost:5000/register HTTP/1.1
+# POST http://localhost:5000/dossier/register HTTP/1.1
 # Content-Type: application/json
 
 # {
-#   "nom": "John",
-#   "prenom": "Doe",
-#   "email": "john@example.com",
-#   "mot_de_passe": "123456",
-#   "role": "medecin",
-#   "id_hopital": 1
+#   "nom": "John4",
+#   "prenom": "Doe4",
+#   "email": "john4@example.com",
+#   "mot_de_passe": "aaaaaaaa",
+#   "role": "admin",
+#   "id_hopital": "148",
+#   "autre_donnees": {
+#     "info": "autre donnzz"
+#   }
 # }
 
 // api pour la creation d un hopitale! 
@@ -25,22 +28,38 @@
 
 // api pour la creation d un personnel!
 
-POST http://localhost:5000/dossier/register HTTP/1.1
+# POST http://localhost:5000/dossier/register HTTP/1.1
+# Content-Type: application/json
+
+# {
+#   "nom": "John3",
+#   "prenom": "Doe3",
+#   "email": "john3@example.com",
+#   "mot_de_passe": "aaaaaaaa",
+#   "role": "admin",
+#   "id_hopital": "147",
+#   "autre_donnees": {
+#     "info": "autre donnzz"
+#   }
+# }
+
+# GET http://localhost:5000/dossier/getall
+
+
+POST http://localhost:5000/dossier/addpatient/148 HTTP/1.1
 Content-Type: application/json
 
 {
-  "nom": "John2",
-  "prenom": "Doe2",
-  "email": "john2@example.com",
+  "nom": "jeanp",
+  "prenom": "Doemon",
+  "date_naissance": "2000-01-01",
+  "age": "25",
+  "sexe": "Masculin",
+  "taille": "180",
+  "adresse": "123 Rue de l'Hopital V",
+  "nom_tuteur": "Tuteur2",
+  "photo": "photo2.jpg",
+  "id_utilisateur": "184",
   "mot_de_passe": "aaaaaaaa",
-  "role": "medecin",
-  "id_hopital": "147",
-  "autre_donnees": {
-    "info": "autre donnzz"
-  }
+  "tel": "+237 620410454"
 }
-
-GET http://localhost:5000/dossier/getall
-
-
-POST 
