@@ -235,6 +235,7 @@ const addPatient = async (req, res) => {
 };
 
 const loginpatient = async (req, res) => {
+  
   try {
     const { email, mot_de_passe } = req.body;
     if (!email || !mot_de_passe) {
