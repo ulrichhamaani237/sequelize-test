@@ -235,7 +235,6 @@ const addPatient = async (req, res) => {
 };
 
 const loginpatient = async (req, res) => {
-  
   try {
     const { email, mot_de_passe } = req.body;
     if (!email || !mot_de_passe) {
@@ -249,20 +248,30 @@ const loginpatient = async (req, res) => {
       return res.status(404).json({ success: false, message: "Patient non trouvé" });
     }
     const utilisateurData = utilisateur.rows[0];
+    console.log("Utilisateur trouvé :", utilisateurData);
+
+    // Vérifie que le champ du mot de passe existe
+    if (!utilisateurData.password) {
+      console.error("Champ password manquant dans la base de données");
+      return res.status(500).json({ success: false, message: "Erreur interne: champ password manquant" });
+    }
+
     const motDePasseHash = await bcrypt.compare(mot_de_passe, utilisateurData.password);
     if (!motDePasseHash) {
       return res.status(401).json({ success: false, message: "Mot de passe incorrect" });
     }
+    if (!process.env.TOKEN_KEY) {
+      console.error("TOKEN_KEY non défini dans les variables d'environnement");
+      return res.status(500).json({ success: false, message: "Erreur de configuration du serveur" });
+    }
     const token = jwt.sign({ id_patient: utilisateurData.id_patient }, process.env.TOKEN_KEY, { expiresIn: '10d' });
     const updatetoken = await query(
-      `UPDATE patient SET token = $1 WHERE id_patient = $2`,
+      `UPDATE patient SET token = $1 WHERE id_patient = $2 RETURNING *`,
       [token, utilisateurData.id_patient]
     );
-
     if (!updatetoken.rows.length) {
       return res.status(404).json({ success: false, message: "Patient non trouvé" });
     }
-
     return res.status(200).json({ success: true, message: "Connexion reussie", utilisateur: utilisateurData, token });
   } catch (error) {
     console.error("Erreur lors de la connexion:", error);
