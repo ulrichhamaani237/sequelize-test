@@ -10,6 +10,7 @@ const CryptoJS = require("crypto-js");
 const { ec: EC } = require("elliptic");
 const ec = new EC("secp256k1");
 const crypto = require("crypto");
+const jwt = require('jsonwebtoken');
 
 
 /**
@@ -170,8 +171,8 @@ const addPatient = async (req, res) => {
     // Vérification des champs obligatoires
     const requiredFields = {
       id_hopital: req.params.id_hopital,
-      nom, prenom, date_naissance, age, sexe, 
-      taille, adresse, nom_tuteur, id_utilisateur, 
+      nom, prenom, date_naissance, age, sexe,
+      taille, adresse, nom_tuteur, id_utilisateur,
       mot_de_passe, tel, email
     };
 
@@ -181,9 +182,9 @@ const addPatient = async (req, res) => {
       .map(([key]) => key);
 
     if (missingFields.length > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: `Champs manquants: ${missingFields.join(', ')}` 
+      return res.status(400).json({
+        success: false,
+        message: `Champs manquants: ${missingFields.join(', ')}`
       });
     }
 
@@ -207,15 +208,15 @@ const addPatient = async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
-        nom, prenom, date_naissance, nom_tuteur, req.params.id_hopital, 
+        nom, prenom, date_naissance, nom_tuteur, req.params.id_hopital,
         adresse, sexe, age, taille, photo, tel, email, hashedPassword
       ]
     );
 
     if (!patient.rows.length) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Erreur lors de la création du patient" 
+      return res.status(400).json({
+        success: false,
+        message: "Erreur lors de la création du patient"
       });
     }
 
@@ -276,6 +277,76 @@ const loginpatient = async (req, res) => {
   } catch (error) {
     console.error("Erreur lors de la connexion du patinent:", error);
     return res.status(500).json({ success: false, message: "Erreur lors de la connexion" });
+  }
+}
+
+const getPrestatairepatient = async (req, res) => {
+  try {
+
+    const { id_patient } = req.body
+    if (!id_patient) {
+      return res.status(400).json({
+        success: false,
+        message: "champs id_patient requise"
+      })
+    }
+
+    const prestatairePatient = await query(`
+      SELECT FROM utilisateur WHERE id_patient = $1`,
+      [id_patient]
+    )
+    if (!prestatairePatient.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Prestataire non trouvé"
+      })
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Prestataire trouvé",
+      prestataire: prestatairePatient.rows[0]
+    })
+  } catch (error) {
+    console.error("Erreur lors de la récupération du prestataire:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la récupération du prestataire"
+    })
+  }
+}
+
+const dossierforpatient = async (req, res)  =>{
+  try {
+    const {id_patient} = req.body
+    if (!id_patient) {
+      return res.status(400).json({
+        success: false,
+        message: "champs id_patient requise"
+      })
+    }
+    const dossierPatient = await query(`
+      SELECT C.detail FROM consultation as C
+      JOIN patient as P ON C.id_patient = P.id_patient
+      WHERE P.id_patient = $1`,
+      [id_patient]
+    )
+    if (!dossierPatient.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Dossier non trouvé"
+      })
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Dossier trouvé",
+      dossier: dossierPatient.rows[0]
+    })
+  } catch (error) {
+    console.error("Erreur lors de la récupération du dossier:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la récupération du dossier"
+    })
   }
 }
 
@@ -604,7 +675,7 @@ const deleteDossier = async (req, res) => {
 const deletePatient = async (req, res) => {
   try {
     const { id_patient } = req.body;
-    
+
     // D'abord récupérer le dossier médical associé
     const dossier = await query(
       `SELECT id_dossier FROM dossier_medical_global WHERE id_patient = $1`,
@@ -613,13 +684,13 @@ const deletePatient = async (req, res) => {
 
     if (dossier.rows.length > 0) {
       const id_dossier = dossier.rows[0].id_dossier;
-      
+
       // Supprimer les consultations associées
       await query(
         `DELETE FROM consultation WHERE id_dossier = $1`,
         [id_dossier]
       );
-      
+
       // Ensuite supprimer le dossier médical
       await query(
         `DELETE FROM dossier_medical_global WHERE id_dossier = $1`,
