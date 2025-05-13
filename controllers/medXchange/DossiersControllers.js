@@ -274,7 +274,7 @@ const loginpatient = async (req, res) => {
     }
     return res.status(200).json({ success: true, message: "Connexion reussie", utilisateur: utilisateurData, token });
   } catch (error) {
-    console.error("Erreur lors de la connexion:", error);
+    console.error("Erreur lors de la connexion du patinent:", error);
     return res.status(500).json({ success: false, message: "Erreur lors de la connexion" });
   }
 }
