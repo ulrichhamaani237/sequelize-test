@@ -823,8 +823,53 @@ const getPatientById = async (req, res) => {
   }
 };
 
+/**
+ * @description get consultation for patient
+ * @param {*} req 
+ * @param {*} res 
+ * @returns 
+ */
+const getconsultationforpatient = async (req, res) => {
 
+  try {
+    const { id_patient } = req.params.id_patient;
+    if (!id_patient) {
+      return res.status(400).json({ 
+        success: false,
+        message: "id_patient manquant" 
+      });
+    }
 
+    const rows = await query(
+      `SELECT c.* , u.nom, u.prenom
+       FROM consultation c 
+       JOIN dossier_medical_global d ON c.id_dossier = d.id_dossier
+       JOIN utilisateur u ON c.id_utilisateur = u.id_utilisateur 
+       WHERE d.id_patient = $1`,
+      [id_patient]
+    );
+
+    if (!rows.rows.length) {
+      return res.status(404).json({ 
+        success: false,
+        message: "Aucune consultation trouvée" 
+      });
+    }
+
+    return res.status(200).json({ 
+      success: true,
+      message: "Consultations trouvées",
+      data: rows.rows 
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur",
+      error: error.message 
+    });
+  }
+};
 
 module.exports = {
   dossierDetails,
@@ -842,5 +887,6 @@ module.exports = {
   editPersonnel,
   addPersonnel,
   getPersonnelById,
-  loginpatient
+  loginpatient,
+  getconsultationforpatient
 };

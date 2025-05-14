@@ -65,13 +65,13 @@
 # }
 
 # /
-POST https://medxchange-backend.onrender.com/dossier/loginpatient
-Content-Type: application/json
+# POST https://medxchange-backend.onrender.com/dossier/loginpatient
+# Content-Type: application/json
 
-{
-  "email": "martin@gmail.com",
-  "mot_de_passe": "aaaaaaaa"
-}
+# {
+#   "email": "martin@gmail.com",
+#   "mot_de_passe": "aaaaaaaa"
+# }
 
 # POST https://medxchange-backend.onrender.com/dossier/addpatient/139
 # Content-Type: application/json
@@ -91,3 +91,9 @@ Content-Type: application/json
 #   "tel": "+237620410455",
 #   "email": "martin@gmail.com"
 # }
+
+// recuperer tous les donnees personnel d un patient
+# GET https://medxchange-backend.onrender.com/dossier/getpatient/1090 HTTP/1.1
+
+GET https://medxchange-backend.onrender.com/dossier/getconsultationforpatient/1090 HTTP/1.1
+
