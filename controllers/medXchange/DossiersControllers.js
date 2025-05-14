@@ -832,7 +832,7 @@ const getPatientById = async (req, res) => {
 const getconsultationforpatient = async (req, res) => {
 
   try {
-    const { id_patient } = req.params.id_patient;
+    const { id_patient } = req.params;
     if (!id_patient) {
       return res.status(400).json({ 
         success: false,
