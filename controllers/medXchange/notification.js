@@ -141,7 +141,7 @@ const sendNotifications = async (req, res) => {
     };
 
     // Accéder à io depuis global
-    global.socket.emit(`notification_${id_utilisateur}`, formattedNotification);
+  global.socket.emit(`notification_${id_utilisateur}`, formattedNotification);
 
     return res.status(201).json({
       success: true,

@@ -1,5 +1,5 @@
 const express = require('express')
-const {createPatient, importPatientsFromExcel, getAllPatient, deletePatient, EditPatient, getPatientById} = require('../../controllers/PatientController')
+const {createPatient, importPatientsFromExcel, getAllPatient, deletePatient, EditPatient, getPatientById} = require('../../controllers/PatientControllers')
 const fileUpload = require('express-fileupload')
 
 const uploadOpts = {

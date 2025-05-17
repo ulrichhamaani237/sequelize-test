@@ -1,0 +1,37 @@
+-- Créer la table de demandes d'accès aux dossiers
+CREATE TABLE IF NOT EXISTS public.demande_acces_dossier (
+    id SERIAL PRIMARY KEY,
+    id_utilisateur INTEGER NOT NULL REFERENCES public.utilisateur(id_utilisateur) ON DELETE CASCADE,
+    id_dossier INTEGER NOT NULL REFERENCES public.dossier_medical_global(id_dossier) ON DELETE CASCADE,
+    date_demande TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    motif TEXT NOT NULL,
+    statut VARCHAR(20) NOT NULL DEFAULT 'EN_ATTENTE', -- EN_ATTENTE, ACCEPTE, REFUSE
+    id_admin_traitant INTEGER REFERENCES public.utilisateur(id_utilisateur),
+    date_traitement TIMESTAMP,
+    commentaire TEXT,
+    UNIQUE(id_utilisateur, id_dossier, statut) WHERE statut = 'EN_ATTENTE'
+);
+
+-- Ajouter un index pour améliorer les performances des requêtes
+CREATE INDEX IF NOT EXISTS idx_demande_acces_utilisateur ON public.demande_acces_dossier(id_utilisateur);
+CREATE INDEX IF NOT EXISTS idx_demande_acces_dossier ON public.demande_acces_dossier(id_dossier);
+CREATE INDEX IF NOT EXISTS idx_demande_acces_statut ON public.demande_acces_dossier(statut);
+
+-- Ajouter le type demande_acces pour les notifications
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notification_type') THEN
+        CREATE TYPE notification_type AS ENUM ('system', 'demande_acces', 'autre');
+        
+        -- Ajouter la colonne type à la table notification s'il n'existe pas déjà de colonne 'type'
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'notification' AND column_name = 'type') THEN
+            ALTER TABLE public.notification ADD COLUMN type notification_type DEFAULT 'system';
+        END IF;
+    ELSE
+        -- Vérifier si le type demande_acces existe déjà dans l'enum
+        IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'demande_acces' AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'notification_type')) THEN
+            ALTER TYPE notification_type ADD VALUE 'demande_acces';
+        END IF;
+    END IF;
+END
+$$; 

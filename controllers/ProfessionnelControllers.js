@@ -5,6 +5,7 @@ const { query } = require('../config/db');
 const bcrypt = require('bcrypt');
 
 const importProffessionnelToExcel = async (req, res) => {
+
   try {
     // Vérifier si le fichier a été récupéré
     if (!req.file) {
@@ -37,7 +38,7 @@ const importProffessionnelToExcel = async (req, res) => {
   }
 };
 
-const getAllProfessionnels = async (req, res) => {
+ const getAllProfessionnels = async (req, res) => {
   try {
     const { id_hopital } = req.body;
     let queryText = "SELECT * FROM utilisateur";

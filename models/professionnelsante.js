@@ -22,6 +22,7 @@ module.exports = (sequelize, DataTypes) => {
     clePublique: DataTypes.TEXT,
     certificatNumerique: DataTypes.TEXT,
     photoProfil: DataTypes.STRING,
+    acces_global_dossiers: DataTypes.BOOLEAN,
   }, {
     sequelize,
     modelName: 'ProfessionnelSante',

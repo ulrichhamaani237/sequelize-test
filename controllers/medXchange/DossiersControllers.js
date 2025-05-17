@@ -161,12 +161,9 @@ const addPatient = async (req, res) => {
   try {
     const {
       nom, prenom, date_naissance, age, sexe, taille, email,
-      adresse, nom_tuteur, photo, id_utilisateur, mot_de_passe, tel
+      adresse, nom_tuteur, photo, id_utilisateur, mot_de_passe, tel,
+      is_paid // Nouveau champ pour le statut de paiement
     } = req.body;
-
-    console.log("req.body:", req.body);
-    console.log("req.params:", req.params);
-
 
     // Vérification des champs obligatoires
     const requiredFields = {
@@ -200,16 +197,17 @@ const addPatient = async (req, res) => {
     // Hachage du mot de passe
     const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
 
-    // Insertion du patient
+    // Insertion du patient avec le nouveau champ is_paid
     const patient = await query(
       `INSERT INTO patient 
        (nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, 
-        sexe, age, taille, photo, tel, email, password)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        sexe, age, taille, photo, tel, email, password, is_paid)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
       [
         nom, prenom, date_naissance, nom_tuteur, req.params.id_hopital,
-        adresse, sexe, age, taille, photo, tel, email, hashedPassword
+        adresse, sexe, age, taille, photo, tel, email, hashedPassword,
+        is_paid !== undefined ? is_paid : false // Valeur par défaut false si non spécifié
       ]
     );
 
@@ -220,17 +218,40 @@ const addPatient = async (req, res) => {
       });
     }
 
-    res.status(201).json({
-      success: true,
-      data: patient.rows[0]
-    });
+    // Créer automatiquement un dossier médical pour le nouveau patient
+    try {
+      const newDossier = await query(
+        `INSERT INTO dossier_medical_global 
+         (id_patient, id_hopital, date_creation, derniere_modification)
+         VALUES ($1, $2, NOW(), NOW())
+         RETURNING *`,
+        [patient.rows[0].id_patient, req.params.id_hopital]
+      );
+      
+      res.status(201).json({
+        success: true,
+        message: "Patient créé avec succès",
+        data: {
+          ...patient.rows[0],
+          dossier: newDossier.rows[0]
+        }
+      });
+    } catch (dossierError) {
+      console.error("Erreur lors de la création du dossier médical:", dossierError);
+      // Le patient a été créé, mais pas le dossier - on informe l'utilisateur
+      res.status(201).json({
+        success: true,
+        warning: "Patient créé, mais erreur lors de la création du dossier médical",
+        data: patient.rows[0]
+      });
+    }
 
   } catch (error) {
     console.error("Erreur lors de l'ajout du patient:", error);
     res.status(500).json({
       success: false,
       message: "Erreur serveur",
-      error: error.message // Afficher le message d'erreur complet pour le débogage
+      error: error.message
     });
   }
 };
@@ -280,6 +301,8 @@ const loginpatient = async (req, res) => {
   }
 }
 
+
+
 const getPrestatairepatient = async (req, res) => {
   try {
 
@@ -316,6 +339,7 @@ const getPrestatairepatient = async (req, res) => {
 }
 
 const dossierforpatient = async (req, res)  =>{
+
   try {
     const {id_patient} = req.body
     if (!id_patient) {
@@ -379,6 +403,7 @@ const storageImage = multer.diskStorage({
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
+
 const uploadImage = multer({
   storage: storageImage,
   fileFilter: function (req, file, cb) {
@@ -676,42 +701,66 @@ const deletePatient = async (req, res) => {
   try {
     const { id_patient } = req.body;
 
-    // D'abord récupérer le dossier médical associé
-    const dossier = await query(
+    if (!id_patient) {
+      return res.status(400).json({
+        success: false, 
+        message: "ID patient requis"
+      });
+    }
+
+    // Vérifier si le patient existe
+    const patientExists = await query(
+      `SELECT id_patient FROM patient WHERE id_patient = $1`,
+      [id_patient]
+    );
+
+    if (patientExists.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient non trouvé"
+      });
+    }
+
+    // Récupérer les dossiers médicaux associés au patient
+    const dossiers = await query(
       `SELECT id_dossier FROM dossier_medical_global WHERE id_patient = $1`,
       [id_patient]
     );
 
-    if (dossier.rows.length > 0) {
-      const id_dossier = dossier.rows[0].id_dossier;
-
-      // Supprimer les consultations associées
+    // Pour chaque dossier, supprimer les consultations associées
+    for (const dossier of dossiers.rows) {
       await query(
         `DELETE FROM consultation WHERE id_dossier = $1`,
-        [id_dossier]
-      );
-
-      // Ensuite supprimer le dossier médical
-      await query(
-        `DELETE FROM dossier_medical_global WHERE id_dossier = $1`,
-        [id_dossier]
+        [dossier.id_dossier]
       );
     }
 
-    // Enfin supprimer le patient
+    // Supprimer les dossiers médicaux
+    if (dossiers.rows.length > 0) {
+      await query(
+        `DELETE FROM dossier_medical_global WHERE id_patient = $1`,
+        [id_patient]
+      );
+    }
+
+    // Supprimer le patient
     const result = await query(
       `DELETE FROM patient WHERE id_patient = $1 RETURNING *`,
       [id_patient]
     );
 
-    if (!result.rows.length) {
-      return res.status(404).json({ success: false, message: "Patient non trouvé" });
-    }
-
-    return res.status(200).json({ success: true, message: "Patient supprimé avec succès" });
+    return res.status(200).json({
+      success: true,
+      message: "Patient supprimé avec succès",
+      data: result.rows[0]
+    });
   } catch (error) {
     console.error("Erreur lors de la suppression du patient:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la suppression du patient",
+      error: error.message
+    });
   }
 };
 
@@ -750,39 +799,119 @@ const editPatient = async (req, res) => {
     sexe,
     taille,
     age,
-    photo
+    photo,
+    tel,
+    email,
+    is_paid // Nouveau champ
   } = req.body;
   const { id_patient } = req.params;
 
   try {
-    const patient = await query(
-      `UPDATE patient 
-             SET nom = $1, 
-                 prenom = $2, 
-                 date_naissance = $3, 
-                 nom_tuteur = $4, 
-                 id_hopital = $5, 
-                 adresse = $6, 
-                 donnees = $7, 
-                 code = $8, 
-                 sexe = $9, 
-                 taille = $10, 
-                 age = $11,
-                 photo = $12 
-             WHERE id_patient = $13`,
-      [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, donnees, code, sexe, taille, age, photo, id_patient]
+    // Vérifier si le patient existe
+    const patientExists = await query(
+      `SELECT id_patient FROM patient WHERE id_patient = $1`,
+      [id_patient]
     );
-    if (!patient.rows.length) {
+
+    if (patientExists.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "Patient non trouvé"
       });
     }
 
-    return res.status(200).json({
-      success: true,
-      message: "Patient modifié avec succès"
-    });
+    // Construire la requête dynamiquement pour ne mettre à jour que les champs fournis
+    let updateFields = [];
+    let params = [];
+    let paramIndex = 1;
+
+    // Ajouter chaque champ à la requête uniquement s'il est défini
+    if (nom !== undefined) {
+      updateFields.push(`nom = $${paramIndex++}`);
+      params.push(nom);
+    }
+    if (prenom !== undefined) {
+      updateFields.push(`prenom = $${paramIndex++}`);
+      params.push(prenom);
+    }
+    if (date_naissance !== undefined) {
+      updateFields.push(`date_naissance = $${paramIndex++}`);
+      params.push(date_naissance);
+    }
+    if (nom_tuteur !== undefined) {
+      updateFields.push(`nom_tuteur = $${paramIndex++}`);
+      params.push(nom_tuteur);
+    }
+    if (id_hopital !== undefined) {
+      updateFields.push(`id_hopital = $${paramIndex++}`);
+      params.push(id_hopital);
+    }
+    if (adresse !== undefined) {
+      updateFields.push(`adresse = $${paramIndex++}`);
+      params.push(adresse);
+    }
+    if (donnees !== undefined) {
+      updateFields.push(`donnees = $${paramIndex++}`);
+      params.push(donnees);
+    }
+    if (code !== undefined) {
+      updateFields.push(`code = $${paramIndex++}`);
+      params.push(code);
+    }
+    if (sexe !== undefined) {
+      updateFields.push(`sexe = $${paramIndex++}`);
+      params.push(sexe);
+    }
+    if (taille !== undefined) {
+      updateFields.push(`taille = $${paramIndex++}`);
+      params.push(taille);
+    }
+    if (age !== undefined) {
+      updateFields.push(`age = $${paramIndex++}`);
+      params.push(age);
+    }
+    if (photo !== undefined) {
+      updateFields.push(`photo = $${paramIndex++}`);
+      params.push(photo);
+    }
+    if (tel !== undefined) {
+      updateFields.push(`tel = $${paramIndex++}`);
+      params.push(tel);
+    }
+    if (email !== undefined) {
+      updateFields.push(`email = $${paramIndex++}`);
+      params.push(email);
+    }
+    if (is_paid !== undefined) {
+      updateFields.push(`is_paid = $${paramIndex++}`);
+      params.push(is_paid);
+    }
+
+    // Ajouter l'ID patient comme dernier paramètre
+    params.push(id_patient);
+
+    // Exécuter la requête seulement si des champs sont à mettre à jour
+    if (updateFields.length > 0) {
+      const query_string = `
+        UPDATE patient 
+        SET ${updateFields.join(', ')} 
+        WHERE id_patient = $${paramIndex}
+        RETURNING *
+      `;
+
+      const result = await query(query_string, params);
+
+      return res.status(200).json({
+        success: true,
+        message: "Patient modifié avec succès",
+        data: result.rows[0]
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Aucune donnée fournie pour la mise à jour"
+      });
+    }
   } catch (error) {
     console.error("Erreur lors de la modification du patient:", error);
     return res.status(500).json({
@@ -871,6 +1000,96 @@ const getconsultationforpatient = async (req, res) => {
   }
 };
 
+/**
+ * @description Met à jour le statut de paiement d'un patient
+ * @param {*} req 
+ * @param {*} res 
+ * @returns {Object} Réponse HTTP
+ */
+const updatePatientPaymentStatus = async (req, res) => {
+  try {
+    const { id_patient } = req.params;
+    const { is_paid } = req.body;
+
+    if (is_paid === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Le statut de paiement (is_paid) est requis"
+      });
+    }
+
+    // Vérifier si le patient existe
+    const patientExists = await query(
+      `SELECT id_patient FROM patient WHERE id_patient = $1`,
+      [id_patient]
+    );
+
+    if (patientExists.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient non trouvé"
+      });
+    }
+
+    // Mettre à jour le statut de paiement
+    const result = await query(
+      `UPDATE patient SET is_paid = $1 WHERE id_patient = $2 RETURNING *`,
+      [is_paid, id_patient]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Statut de paiement mis à jour avec succès (${is_paid ? 'Payé' : 'Non payé'})`,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Erreur lors de la mise à jour du statut de paiement:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la mise à jour du statut de paiement",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @description Récupère tous les patients d'un hôpital
+ * @param {*} req 
+ * @param {*} res 
+ * @returns {Object} Réponse HTTP avec la liste des patients
+ */
+const getAllPatients = async (req, res) => {
+  try {
+    const { id_hopital } = req.body;
+
+    if (!id_hopital) {
+      return res.status(400).json({
+        success: false,
+        message: "L'ID de l'hôpital est requis"
+      });
+    }
+
+    // Récupérer tous les patients de l'hôpital
+    const patients = await query(
+      `SELECT * FROM patient WHERE id_hopital = $1 ORDER BY nom ASC`,
+      [id_hopital]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Patients récupérés avec succès",
+      data: patients.rows
+    });
+  } catch (error) {
+    console.error("Erreur lors de la récupération des patients:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la récupération des patients",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   dossierDetails,
   getConsultation,
@@ -888,5 +1107,7 @@ module.exports = {
   addPersonnel,
   getPersonnelById,
   loginpatient,
-  getconsultationforpatient
+  getconsultationforpatient,
+  updatePatientPaymentStatus,
+  getAllPatients
 };

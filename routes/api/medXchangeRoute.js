@@ -23,7 +23,8 @@ const {
 const {dossierDetails, getConsultation,deletePatient,
   deleteConsultation, editPatient, getPatientById, 
   addPatient,setActivePersonnel,setInactivePersonnel,
-  editPersonnel,addPersonnel,getPersonnelById,loginpatient,getconsultationforpatient} = require('../../controllers/medXchange/DossiersControllers')
+  editPersonnel,addPersonnel,getPersonnelById,loginpatient,
+  getconsultationforpatient, updatePatientPaymentStatus, getAllPatients} = require('../../controllers/medXchange/DossiersControllers')
 const {
   notifications,
   sendNotifications,
@@ -101,4 +102,11 @@ router.post('/notifications', sendNotifications); // Correction: Ajouter '/' ava
 //dossier -----------------------------------------------------------------------------------
 
 router.post('/dossierdetails/:id_dossier', dossierDetails)
+
+// Route pour mettre à jour le statut de paiement d'un patient
+router.post('/updatePatientPaymentStatus/:id_patient', updatePatientPaymentStatus);
+
+// Route pour obtenir tous les patients d'un hôpital
+router.post('/all/patients', getAllPatients);
+
 module.exports = router;
