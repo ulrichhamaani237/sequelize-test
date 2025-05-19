@@ -95,5 +95,87 @@
 // recuperer tous les donnees personnel d un patient
 # GET https://medxchange-backend.onrender.com/dossier/getpatient/1090 HTTP/1.1
 
-GET https://medxchange-backend.onrender.com/dossier/getconsultationforpatient/1090 HTTP/1.1
+#GET https://medxchange-backend.onrender.com/dossier/getconsultationforpatient/1090 HTTP/1.1
+
+#POST https://medxchange-backend.onrender.com/dossier/importPersonnel HTTP/1.1
+#Content-Type: application/json
+
+# {
+#   "id_hopital": "148"
+# }
+
+#POST http://localhost:5000/dossier/getprofessionnels HTTP/1.1
+#Content-Type: application/json
+
+#{
+ #  "id_hopital": "147"
+#}
+
+
+# POST http://localhost:5000/dossier/create HTTP/1.1
+# Content-Type: application/json
+
+#  {
+#       "nom": "mario",
+#       "prenom": "samain",
+#       "email": "mario@example.com",
+#       "role": "infirmier",
+#       "specialite": "infirmier",
+#       "sexe": "Masculin",
+#       "id_hopital": "147",
+#       "access_record": false
+# }
+
+# POST  http://localhost:5000/dossier/autorisation HTTP/1.1
+# Content-Type: application/json
+
+# {
+ 
+#   "id_utilisateur": "184",
+#   "id_dossier": "1153",
+#   "id_admin": "147"
+# }
+
+# DELETE  http://localhost:5000/dossier/autorisation/1 HTTP/1.1
+
+ #GET  http://localhost:5000/dossier/dossiers-autorises/184 HTTP/1.1
+
+
+# POST  http://localhost:5000/dossier/demande-acces HTTP/1.1
+# Content-Type: application/json
+
+# {
+ 
+#    "id_utilisateur": "184",
+#    "id_dossier": "1153",
+#    "motif": "Motif de la demande"
+# }
+
+# PUT  http://localhost:5000/dossier/update/184 HTTP/1.1
+# Content-Type: application/json
+
+# {
+ 
+#    "nom": "ulrich",
+#    "prenom": "soro",
+#    "email": "sroo2@example.com",
+#    "role": "infirmier",
+#    "specialite": "infirmier",
+#    "sexe": "Masculin",
+#    "id_hopital": "147",
+#    "access_record": true
+# }
+
+#GET http://localhost:5000/dossier/demandes-acces HTTP/1.
+
+POST http://localhost:5000/dossier/traiter-demande HTTP/1.1
+Content-Type: application/json
+
+{
+ 
+   "id_demande": "1",
+   "id_admin": "183",
+   "statut": "accepter",
+   "commentaire": "commentaire"
+}
 

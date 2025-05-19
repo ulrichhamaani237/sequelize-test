@@ -7,7 +7,7 @@ const bodyParser = require('body-parser');
 const patientRoutes = require('./routes/api/PatientRoutes');
 const ProfessionnelSanteRoutes = require('./routes/api/ProfessionnelSanteRoutes');
 const medXchangeRoute = require('./routes/api/medXchangeRoute');
-
+const  personnelRoute = require('./routes/api/ProfessionnelSanteRoutes')
 const app = express();
 const server = http.createServer(app);
 // Configurer CORS pour Socket.IO
@@ -45,6 +45,7 @@ app.use(bodyParser.json());
 app.use('/patients', patientRoutes);
 app.use('/professionnels', ProfessionnelSanteRoutes);
 app.use('/dossier', medXchangeRoute);
+app.use('/dossier', personnelRoute)
 
 // IMPORTANT: Utiliser 'server' au lieu de 'app' pour écouter
 server.listen(5000, () => {

@@ -4,37 +4,161 @@ const upload = require('../uploads/uploadProfess');
 const { query } = require('../config/db');
 const bcrypt = require('bcrypt');
 
-const importProffessionnelToExcel = async (req, res) => {
+const impoterProffessionnelToExcel = async (req, res) => {
+  const { id_hopital } = req.body;
+
+  if (!id_hopital) {
+      return res.status(400).json({
+          success: false,
+          message: "L'ID de l'hôpital est requis"
+      });
+  }
+
+  if (!req.file) {
+      return res.status(400).json({
+          success: false,
+          message: "Aucun fichier sélectionné"
+      });
+  }
+
+  const filepath = req.file.path;
 
   try {
-    // Vérifier si le fichier a été récupéré
-    if (!req.file) {
-      console.log('Aucun fichier sélectionné');
-      return res.status(400).json({ message: "Aucun fichier sélectionné" });
-    }
+      // Lecture du fichier Excel
+      const workbook = xlsx.readFile(filepath);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const jsonData = xlsx.utils.sheet_to_json(sheet);
 
-    const filePath = req.file.path; // Chemin du fichier uploadé
-    console.log('Chemin du fichier:', filePath);
+      if (!jsonData || jsonData.length === 0) {
+          fs.unlinkSync(filepath);
+          
+          return res.status(400).json({
+              success: false,
+              message: 'Le fichier est vide ou mal formaté'
+          });
+      }
 
-    // Récupération des données dans le fichier Excel
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0]; // Récupérer le nom de la première feuille
-    const sheet = workbook.Sheets[sheetName]; // Récupérer la feuille
+      const personnelfields = ["nom", "prenom", "email", "mot_de_passe_hash", "role", "adresse"];
+      const personnelData = [];
 
-    // Convertir la feuille en JSON
-    const jsonData = xlsx.utils.sheet_to_json(sheet);
-    console.log('Données JSON:', jsonData);
+      for (const row of jsonData) {
+          // Validation des champs obligatoires
+          if (!row.nom || !row.prenom || !row.email || !row.mot_de_passe_hash || !row.role) {
+              throw new Error(`Tous les champs obligatoires doivent être remplis pour ${row.nom || ''} ${row.prenom || ''}`);
+          }
 
-    // Enregistrer les données dans la base de données
-    for (const row of jsonData) {
-      await ProfessionnelSante.create(row);
-    }
 
-    console.log('Fichier importé avec succès');
-    res.status(200).json({ message: 'Fichier importé avec succès', data: jsonData });
+          const password_hash = bcrypt.hashSync(row.mot_de_passe_hash, 10);
+          const date_creation = new Date();
+
+          // Construction de l'objet autre_donnees avec tous les champs non-standard
+          const autre_donnees = {};
+          for (const [key, value] of Object.entries(row)) {
+              if (!personnelfields.includes(key.toLowerCase()) && key !== 'id_hopital') {
+                  autre_donnees[key] = value !== undefined ? value : null;
+              }
+          }
+
+          const personnel = {
+              nom: row.nom,
+              prenom: row.prenom,
+              email: row.email,
+              mot_de_passe_hash: password_hash,
+              role: row.role,
+              id_hopital: id_hopital,
+              autre_donnees: JSON.stringify(autre_donnees), // Conversion en JSON
+              adresse: row.adresse || null,
+              created_at: date_creation,
+              updated_at: date_creation
+          };
+
+          personnelData.push(personnel);
+      }
+
+      // Insertion des données
+      const insertedIds = [];
+      for (const personnel of personnelData) {
+          try {
+              const sql = `
+                  INSERT INTO utilisateur(
+                      nom, prenom, email,
+                      mot_de_passe_hash, role, id_hopital, autre_donnees,
+                      adresse, created_at, updated_at
+                  )
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                  RETURNING id_utilisateur
+              `;
+
+              const result = await query(sql, [
+                  personnel.nom,
+                  personnel.prenom,
+                  personnel.email,
+                  personnel.mot_de_passe_hash,
+                  personnel.role,
+                  personnel.id_hopital,
+                  personnel.autre_donnees,
+                  personnel.adresse,
+                  personnel.created_at,
+                  personnel.updated_at
+              ]);
+
+              if (!result.rows[0]) {
+                  throw new Error(`Échec de l'insertion pour ${personnel.nom} ${personnel.prenom}`);
+              }
+
+              const token = jwt.sign(
+                  {
+                      id_utilisateur: result.rows[0].id_utilisateur,
+                      email: personnel.email,
+                      role: personnel.role
+                  },
+                  process.env.TOKEN_KEY,
+                  { expiresIn: '30d' }
+              );
+
+              await query(
+                  `UPDATE utilisateur SET token = $1 
+                  WHERE id_utilisateur = $2`,
+                  [token, result.rows[0].id_utilisateur]
+              );
+
+              insertedIds.push(result.rows[0].id_utilisateur);
+          } catch (error) {
+              console.error(`Erreur lors de l'insertion de ${personnel.nom} ${personnel.prenom}:`, error);
+              // Continue avec les autres enregistrements même en cas d'erreur
+          }
+      }
+
+      if (insertedIds.length === 0) {
+          throw new Error("Aucun enregistrement n'a pu être inséré");
+      }
+
+      fs.unlinkSync(filepath);
+
+      res.status(200).json({
+          success: true,
+          message: 'Importation terminée avec succès',
+          stats: {
+              total: jsonData.length,
+              inserted: insertedIds.length,
+              failed: jsonData.length - insertedIds.length
+          },
+          insertedIds
+      });
+
   } catch (error) {
-    console.error('Erreur lors de l\'importation du fichier:', error);
-    res.status(500).json({ message: error.message });
+      if (fs.existsSync(filepath)) {
+          fs.unlinkSync(filepath);
+      }
+
+      console.error('Erreur lors de l\'importation:', error);
+      res.status(500).json({
+          success: false,
+          message: 'Erreur lors de l\'importation',
+          error: error.message,
+          details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
   }
 };
 
@@ -79,7 +203,7 @@ const createProfessionnel = async (req, res) => {
       specialite,
       sexe,
       id_hopital,
-      acces_global_dossiers
+      access_record
     } = req.body;
 
     // Validation des champs obligatoires
@@ -97,10 +221,10 @@ const createProfessionnel = async (req, res) => {
     // Insérer le professionnel avec le statut d'accès global aux dossiers
     const result = await query(`
       INSERT INTO utilisateur 
-      (nom, prenom, email, mot_de_passe_hash, role, id_hopital, specialite, sexe, acces_global_dossiers) 
+      (nom, prenom, email, mot_de_passe_hash, role, id_hopital, specialite, sexe,access_record) 
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
       RETURNING *
-    `, [nom, prenom, email, hashedPassword, role, id_hopital, specialite, sexe, acces_global_dossiers || false]);
+    `, [nom, prenom, email, hashedPassword, role, id_hopital, specialite, sexe, access_record || false]);
 
     if (result.rows.length === 0) {
       throw new Error("Erreur lors de la création du professionnel de santé");
@@ -141,7 +265,7 @@ const ajouterAutorisationDossier = async (req, res) => {
     // Vérifier si l'autorisation existe déjà
     const existCheck = await query(`
       SELECT * FROM utilisateur_dosssier_autorise 
-      WHERE id_utilisateur = $1 AND id_dossier = $2
+      WHERE id_utilisateur = $1 AND id_dossier = $2 
     `, [id_utilisateur, id_dossier]);
 
     if (existCheck.rows.length > 0) {
@@ -229,19 +353,19 @@ const getDossiersAutorises = async (req, res) => {
 
     // Vérifier si l'utilisateur a un accès global
     const userCheck = await query(`
-      SELECT acces_global_dossiers FROM utilisateur 
+      SELECT access_record FROM utilisateur 
       WHERE id_utilisateur = $1
     `, [id_utilisateur]);
 
     if (userCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Utilisateur non trouvé'
+        message: 'Professionnel non trouvé'
       });
     }
 
     // Si l'utilisateur a un accès global, renvoyer tous les dossiers
-    if (userCheck.rows[0].acces_global_dossiers) {
+    if (userCheck.rows[0].access_record) {
       const allDossiers = await query(`
         SELECT dmg.*, p.nom as nom_patient, p.prenom as prenom_patient
         FROM dossier_medical_global dmg
@@ -363,7 +487,7 @@ const updateProfessionnel = async (req, res) => {
       role,
       specialite,
       sexe,
-      acces_global_dossiers,
+      access_record,
       reset_password
     } = req.body;
 
@@ -415,9 +539,9 @@ const updateProfessionnel = async (req, res) => {
       params.push(sexe);
     }
     
-    if (acces_global_dossiers !== undefined) {
-      updateFields.push(`acces_global_dossiers = $${paramCount++}`);
-      params.push(acces_global_dossiers);
+    if (access_record !== undefined) {
+      updateFields.push(`access_record = $${paramCount++}`);
+      params.push(access_record);
     }
 
     // Si on demande une réinitialisation du mot de passe
@@ -544,13 +668,22 @@ const traiterDemandeAcces = async (req, res) => {
     `, [statut, id_admin, commentaire || null, id_demande]);
     
     // Si la demande est acceptée, ajouter l'autorisation
-    if (statut === 'ACCEPTE') {
-      await query(`
-        INSERT INTO utilisateur_dosssier_autorise 
-        (id_utilisateur, id_dossier, autorisation_donnee_par) 
-        VALUES ($1, $2, $3)
-        ON CONFLICT (id_utilisateur, id_dossier) DO NOTHING
-      `, [demande.rows[0].id_utilisateur, demande.rows[0].id_dossier, id_admin]);
+    if (statut === 'accepter') {
+      const { id_utilisateur, id_dossier } = demande.rows[0];
+      
+      // Vérifier si l'autorisation existe déjà
+      const existCheck = await query(`
+        SELECT * FROM utilisateur_dosssier_autorise 
+        WHERE id_utilisateur = $1 AND id_dossier = $2
+      `, [id_utilisateur, id_dossier]);
+
+      if (existCheck.rows.length === 0) {
+        await query(`
+          INSERT INTO utilisateur_dosssier_autorise 
+          (id_utilisateur, id_dossier, autorisation_donnee_par) 
+          VALUES ($1, $2, $3)
+        `, [id_utilisateur, id_dossier, id_admin]);
+      }
     }
     
     // Créer une notification pour le professionnel
@@ -575,12 +708,12 @@ const traiterDemandeAcces = async (req, res) => {
       VALUES ($1, $2, 'demande_acces')
     `, [
       demande.rows[0].id_utilisateur, 
-      `Votre demande d'accès au dossier de ${nomPatient} a été ${statut === 'ACCEPTE' ? 'acceptée' : 'refusée'}.${commentaire ? ' Commentaire: ' + commentaire : ''}`
+      `Votre demande d'accès au dossier de ${nomPatient} a été ${statut === 'accepter' ? 'acceptée' : 'refusée'}.${commentaire ? ' Commentaire: ' + commentaire : ''}`
     ]);
     
     res.status(200).json({
       success: true,
-      message: `Demande ${statut === 'ACCEPTE' ? 'acceptée' : 'refusée'} avec succès`,
+      message: `Demande ${statut === 'accepter' ? 'acceptée' : 'refusée'} avec succès`,
       demande: updateResult.rows[0]
     });
   } catch (error) {
@@ -673,7 +806,7 @@ const setInactivePersonnel = async (req, res) => {
 };
 
 module.exports = {
-  importProffessionnelToExcel,
+  impoterProffessionnelToExcel,
   getAllProfessionnels,
   createProfessionnel,
   ajouterAutorisationDossier,

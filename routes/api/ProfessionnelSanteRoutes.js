@@ -1,9 +1,22 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
-const upload = require('../../uploads/uploadProfess');
+
+const upload = multer({
+  dest: "uploads/",
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      return cb(new Error("Seuls les fichiers Excel sont acceptés"));
+    }
+    cb(null, true);
+  },
+});
 const { 
   getAllProfessionnels, 
-  importProffessionnelToExcel,
+  impoterProffessionnelToExcel,
   createProfessionnel,
   ajouterAutorisationDossier,
   supprimerAutorisationDossier,
@@ -17,10 +30,10 @@ const {
 } = require('../../controllers/ProfessionnelControllers');
 
 // router.get('/getallprofessionnels', getAllProfessionnels);
-router.post('/upload', upload.single('file'), importProffessionnelToExcel);
+router.post('/importPersonnel', upload.single('file'), impoterProffessionnelToExcel);
 
 router.post('/create', createProfessionnel);
-router.put('/:id_utilisateur', updateProfessionnel);
+router.put('/update/:id_utilisateur', updateProfessionnel);
 router.post('/autorisation', ajouterAutorisationDossier);
 router.delete('/autorisation/:id_autorisation', supprimerAutorisationDossier);
 router.get('/dossiers-autorises/:id_utilisateur', getDossiersAutorises);
