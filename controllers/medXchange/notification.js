@@ -1,4 +1,5 @@
 const { query } = require("../../config/db");
+const socketIO = require('../../socket');
 
 const envoyerNotificationUtilisateur = async (userId, message) => {
   try {
@@ -133,15 +134,18 @@ const sendNotifications = async (req, res) => {
 
     // Formater la notification pour l'émission en temps réel
     const formattedNotification = {
-      id: newNotification.id_utilisateur, // ID de la notification, pas de l'utilisateur
+      id: newNotification.id_utilisateur,
       message: newNotification.message,
       time: "À l'instant",
       read: false,
       type: newNotification.type || "system",
     };
 
-    // Accéder à io depuis global
-  global.socket.emit(`notification_${id_utilisateur}`, formattedNotification);
+    // Émettre la notification via socket.io
+    const io = socketIO.getIO();
+    if (io) {
+      io.to(`user_${id_utilisateur}`).emit('notification', formattedNotification);
+    }
 
     return res.status(201).json({
       success: true,
@@ -152,7 +156,6 @@ const sendNotifications = async (req, res) => {
   } catch (error) {
     console.error("Erreur dans sendNotifications:", error);
 
-    // Gestion spécifique des erreurs de contrainte
     if (error.code === "23503") {
       return res.status(400).json({
         success: false,
@@ -285,12 +288,7 @@ function formatTimeAgo(date) {
 async function sendBulkNotifications(message, userIds, type = "system") {
   try {
     // Validation des entrées
-    if (
-      !message ||
-      !userIds ||
-      !Array.isArray(userIds) ||
-      userIds.length === 0
-    ) {
+    if (!message || !userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return {
         success: false,
         message: "Message et tableau d'IDs utilisateur sont obligatoires",
@@ -334,17 +332,19 @@ async function sendBulkNotifications(message, userIds, type = "system") {
       values.flat()
     );
 
-
     // Émission des notifications en temps réel
-    response.rows.forEach((notif) => {
-      global.socket.emit(`notification_${notif.id_utilisateur}`, {
-        id: notif.id,
-        message: notif.message,
-        time: "À l'instant",
-        read: false,
-        type: notif.type || "system",
+    const io = socketIO.getIO();
+    if (io) {
+      response.rows.forEach((notif) => {
+        io.to(`user_${notif.id_utilisateur}`).emit('notification', {
+          id: notif.id,
+          message: notif.message,
+          time: "À l'instant",
+          read: false,
+          type: notif.type || "system",
+        });
       });
-    });
+    }
 
     return {
       success: true,
@@ -355,7 +355,6 @@ async function sendBulkNotifications(message, userIds, type = "system") {
   } catch (error) {
     console.error("Erreur dans sendBulkNotifications:", error);
 
-    // Gestion spécifique des erreurs PostgreSQL
     if (error.code === "23503") {
       const match = error.message.match(/Key \(id_utilisateur\)=\((\d+)\)/);
       return {

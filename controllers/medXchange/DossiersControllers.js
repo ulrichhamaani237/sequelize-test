@@ -74,7 +74,7 @@ const addPersonnel = async (req, res) => {
  */
 const getPersonnelById = async (req, res) => {
   try {
-    const id_utilisateur = req.params.id_utilisateur;
+    const { id_utilisateur } = req.params;
     const personnel = await query(
       `SELECT * FROM utilisateur WHERE id_utilisateur = $1`,
       [id_utilisateur]
@@ -922,6 +922,42 @@ const editPatient = async (req, res) => {
   }
 };
 
+/**
+ * @description get dossier by id
+ * @param {*} req 
+ * @param {*} res 
+ * @returns 
+ */
+const getDossierById = async (req, res) => {
+  const { id_dossier } = req.params;
+  try {
+    const dossier = await query(
+      `SELECT * FROM dossier_medical_global WHERE id_dossier = $1`,
+      [id_dossier]
+    );
+
+    if (!dossier.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Dossier non trouvé"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Dossier trouvé avec succès",
+      dossier: dossier.rows[0]
+    });
+  } catch (error) {
+    console.error("Erreur lors de la recherche du dossier:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de la recherche du dossier",
+      error: error.message
+    });
+  }
+};
+
 const getPatientById = async (req, res) => {
   const { id_patient } = req.params;
   try {
@@ -940,7 +976,7 @@ const getPatientById = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Patient trouvé avec succès",
-      data: patient.rows[0]
+      patient: patient.rows[0]
     });
   } catch (error) {
     console.error("Erreur lors de la recherche du patient:", error);
@@ -988,7 +1024,7 @@ const getconsultationforpatient = async (req, res) => {
     return res.status(200).json({ 
       success: true,
       message: "Consultations trouvées",
-      data: rows.rows 
+      consultations: rows.rows 
     });
   } catch (error) {
     console.error(error);
@@ -1090,6 +1126,345 @@ const getAllPatients = async (req, res) => {
   }
 };
 
+const ajouterDonneesMedicales = async (req, res) => {
+  const {
+    id_dossier,
+    id_utilisateur,
+    password,
+    // Données de diagnostic
+    diagnostic_principal,
+    diagnostic_secondaire,
+    symptomes,
+    debut_symptomes,
+    intensite_douleur,
+    etat_general,
+    conscience,
+    examen_physique,
+    antecedents_medicaux,
+    allergies,
+    medicaments_actuels,
+    examens_complementaires,
+    // Données de prescription
+    medicaments,
+    posologie,
+    duree_traitement,
+    recommandations,
+    // Données de traitement
+    type_traitement,
+    description,
+    prochain_rendez_vous,
+    orientation_specialiste,
+    specialiste
+  } = req.body;
+
+  try {
+    // Vérifier l'accès au dossier
+    const accesResult = await query(
+      `SELECT * FROM utilisateur_dosssier_autorise 
+       WHERE id_dossier = $1 AND id_utilisateur = $2`,
+      [id_dossier, id_utilisateur]
+    );
+
+    if (!accesResult.rows.length) {
+      return res.status(403).json({
+        success: false,
+        message: "Vous n'avez pas l'autorisation d'accéder à ce dossier"
+      });
+    }
+
+    // Récupérer les informations de l'utilisateur
+    const userResult = await query(
+      `SELECT * FROM utilisateur WHERE id_utilisateur = $1`,
+      [id_utilisateur]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Utilisateur non trouvé"
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Vérifier le mot de passe
+    const validPassword = await bcrypt.compare(password, user.mot_de_passe_hash);
+    if (!validPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "Mot de passe incorrect"
+      });
+    }
+
+    // Déchiffrer la clé privée
+    let decryptedPrivateKey;
+    try {
+      const encryptedData = user.cle_prive;
+      if (!encryptedData) {
+        return res.status(400).json({
+          success: false,
+          message: "Clé privée non trouvée"
+        });
+      }
+
+      const parts = encryptedData.split(':');
+      if (parts.length !== 3) {
+        return res.status(400).json({
+          success: false,
+          message: "Format de clé privée invalide"
+        });
+      }
+
+      const [saltHex, ivHex, encryptedKey] = parts;
+      const salt = Buffer.from(saltHex, 'hex');
+      const iv = Buffer.from(ivHex, 'hex');
+      const derivedKey = crypto.scryptSync(password, salt, 32);
+      const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
+      
+      decryptedPrivateKey = decipher.update(encryptedKey, 'hex', 'utf8') + 
+                           decipher.final('utf8');
+
+      if (!/^[0-9a-fA-F]+$/.test(decryptedPrivateKey)) {
+        return res.status(400).json({
+          success: false,
+          message: "Clé privée invalide après déchiffrement"
+        });
+      }
+    } catch (error) {
+      console.error('Erreur de déchiffrement:', error);
+      return res.status(400).json({
+        success: false,
+        message: "Erreur lors du déchiffrement de la clé privée"
+      });
+    }
+
+    // Insérer les données dans chaque table si des données sont présentes
+    const results = {};
+
+    // 1. Diagnostic
+    if (diagnostic_principal || diagnostic_secondaire || symptomes || examen_physique) {
+      const diagnosticData = {
+        type: 'DIAGNOSTIC_MEDICAL',
+        id_dossier,
+        id_utilisateur,
+        diagnostic_principal,
+        diagnostic_secondaire,
+        symptomes,
+        debut_symptomes,
+        intensite_douleur,
+        etat_general,
+        conscience,
+        examen_physique,
+        antecedents_medicaux,
+        allergies,
+        medicaments_actuels,
+        examens_complementaires,
+        timestamp: new Date().toISOString()
+      };
+
+      const dataStr = JSON.stringify(diagnosticData);
+      const dataHash = SHA256(dataStr).toString();
+      const key = ec.keyFromPrivate(decryptedPrivateKey);
+      const signature = key.sign(dataHash).toDER('hex');
+
+      const blockchainResult = await addrecordBlockchain(
+        diagnosticData,
+        signature,
+        user.cle_publique,
+        process.env.BLOCKCHAIN_SECRET_KEY
+      );
+
+      if (!blockchainResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: "Erreur lors de l'enregistrement dans la blockchain",
+          error: blockchainResult.error
+        });
+      }
+
+      const diagnosticResult = await query(
+        `INSERT INTO diagnostic_medical (
+          id_dossier, id_utilisateur, diagnostic_principal, diagnostic_secondaire,
+          symptomes, debut_symptomes, intensite_douleur, etat_general,
+          conscience, examen_physique, antecedents_medicaux, allergies,
+          medicaments_actuels, examens_complementaires, signature, hash_blockchain
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        RETURNING id_diagnostic`,
+        [
+          id_dossier, id_utilisateur, diagnostic_principal, diagnostic_secondaire,
+          JSON.stringify(symptomes), debut_symptomes, intensite_douleur, etat_general,
+          conscience, examen_physique, JSON.stringify(antecedents_medicaux),
+          JSON.stringify(allergies), JSON.stringify(medicaments_actuels),
+          JSON.stringify(examens_complementaires), signature, blockchainResult.hash
+        ]
+      );
+
+      results.diagnostic = diagnosticResult.rows[0];
+    }
+
+    // 2. Prescription
+    if (medicaments && medicaments.length > 0) {
+      const prescriptionData = {
+        type: 'PRESCRIPTION_MEDICALE',
+        id_dossier,
+        id_utilisateur,
+        medicaments,
+        posologie,
+        duree_traitement,
+        recommandations,
+        timestamp: new Date().toISOString()
+      };
+
+      const dataStr = JSON.stringify(prescriptionData);
+      const dataHash = SHA256(dataStr).toString();
+      const key = ec.keyFromPrivate(decryptedPrivateKey);
+      const signature = key.sign(dataHash).toDER('hex');
+
+      const blockchainResult = await addrecordBlockchain(
+        prescriptionData,
+        signature,
+        user.cle_publique,
+        process.env.BLOCKCHAIN_SECRET_KEY
+      );
+
+      if (!blockchainResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: "Erreur lors de l'enregistrement dans la blockchain",
+          error: blockchainResult.error
+        });
+      }
+
+      const prescriptionResult = await query(
+        `INSERT INTO prescription_medicale (
+          id_dossier, id_utilisateur, medicaments, posologie,
+          duree_traitement, recommandations, signature, hash_blockchain
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id_prescription`,
+        [
+          id_dossier, id_utilisateur, JSON.stringify(medicaments),
+          posologie, duree_traitement, recommandations,
+          signature, blockchainResult.hash
+        ]
+      );
+
+      results.prescription = prescriptionResult.rows[0];
+    }
+
+    // 3. Traitement
+    if (type_traitement || description) {
+      const traitementData = {
+        type: 'TRAITEMENT_MEDICAL',
+        id_dossier,
+        id_utilisateur,
+        type_traitement,
+        description,
+        prochain_rendez_vous,
+        orientation_specialiste,
+        specialiste,
+        timestamp: new Date().toISOString()
+      };
+
+      const dataStr = JSON.stringify(traitementData);
+      const dataHash = SHA256(dataStr).toString();
+      const key = ec.keyFromPrivate(decryptedPrivateKey);
+      const signature = key.sign(dataHash).toDER('hex');
+
+      const blockchainResult = await addrecordBlockchain(
+        traitementData,
+        signature,
+        user.cle_publique,
+        process.env.BLOCKCHAIN_SECRET_KEY
+      );
+
+      if (!blockchainResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: "Erreur lors de l'enregistrement dans la blockchain",
+          error: blockchainResult.error
+        });
+      }
+
+      const traitementResult = await query(
+        `INSERT INTO traitement_medical (
+          id_dossier, id_utilisateur, type_traitement, description,
+          prochain_rendez_vous, orientation_specialiste, specialiste,
+          signature, hash_blockchain
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id_traitement`,
+        [
+          id_dossier, id_utilisateur, type_traitement, description,
+          prochain_rendez_vous, orientation_specialiste, specialiste,
+          signature, blockchainResult.hash
+        ]
+      );
+
+      results.traitement = traitementResult.rows[0];
+    }
+
+    // Enregistrer dans l'historique
+    await query(
+      `INSERT INTO historique_acces_dossier (
+        id_dossier, id_utilisateur, type_action, operation_type,
+        details, signature, id_hopital
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        id_dossier,
+        id_utilisateur,
+        'AJOUT_DONNEES_MEDICALES',
+        'INSERT',
+        JSON.stringify(results),
+        signature,
+        user.id_hopital
+      ]
+    );
+
+    // Envoyer une notification
+    const dossierResult = await query(
+      `SELECT p.nom, p.prenom FROM dossier_medical_global d
+       JOIN patient p ON d.id_patient = p.id_patient
+       WHERE d.id_dossier = $1`,
+      [id_dossier]
+    );
+
+    if (dossierResult.rows.length > 0) {
+      const patient = dossierResult.rows[0];
+      const message = `${user.nom} ${user.prenom} a ajouté des données médicales au dossier de ${patient.prenom} ${patient.nom}`;
+      
+      await query(
+        `INSERT INTO notification (id_utilisateur, message, type)
+         SELECT id_utilisateur, $1, 'system'
+         FROM utilisateur
+         WHERE id_hopital = $2 AND id_utilisateur != $3`,
+        [message, user.id_hopital, id_utilisateur]
+      );
+
+      // Envoyer la notification via Socket.IO
+      if (socketIO && socketIO.io) {
+        socketIO.io.to(`hopital_${user.id_hopital}`).emit('notification', {
+          message,
+          type: 'system',
+          timestamp: new Date()
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Données médicales ajoutées avec succès",
+      data: results
+    });
+
+  } catch (error) {
+    console.error("Erreur lors de l'ajout des données médicales:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur lors de l'ajout des données médicales",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   dossierDetails,
   getConsultation,
@@ -1109,5 +1484,7 @@ module.exports = {
   loginpatient,
   getconsultationforpatient,
   updatePatientPaymentStatus,
-  getAllPatients
+  getAllPatients,
+  ajouterDonneesMedicales,
+  getDossierById,
 };

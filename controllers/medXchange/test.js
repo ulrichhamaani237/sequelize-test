@@ -431,6 +431,7 @@ const getdossier = async (req, res) => {
     }
 }
 
+
 const getAuthorisezeHopital = async (req, res) => {
     const { id_hopitale, nom_patient, nom_tuteur } = req.body;
 

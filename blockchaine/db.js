@@ -6,8 +6,6 @@ const mongoose = require("mongoose");
 const DB_URI = "mongodb+srv://ulrich_dev:%2B237Ulrich@cluster0.yozxkoq.mongodb.net/medicalchain?retryWrites=true&w=majority";
 
 mongoose.connect(DB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
   ssl: true,
   tlsAllowInvalidCertificates: false // À n'utiliser qu'en développement
 })

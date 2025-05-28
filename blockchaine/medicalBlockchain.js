@@ -96,7 +96,7 @@ async function addrecordBlockchain(dossier, signature, publicKey, secretKey) {
 }
 
 /**
- * Mine un nouveau bloc à partir des dossiers en attente et l’ajoute à la blockchain.
+ * Mine un nouveau bloc à partir des dossiers en attente et l'ajoute à la blockchain.
  * Supprime les enregistrements en attente et synchronise avec les autres nœuds.
  * 
  * @returns {Promise<{ success?: string, block?: object, error?: string }>}
@@ -189,7 +189,7 @@ function calculateHash(index, timestamp, data, previousHash) {
 }
 
 /**
- * Vérifie l’intégrité de toute la blockchain (hashs, liens, signatures).
+ * Vérifie l'intégrité de toute la blockchain (hashs, liens, signatures).
  * 
  * @returns {Promise<{ isValid: boolean, error?: string }>}
  */

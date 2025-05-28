@@ -1,0 +1,66 @@
+### Supprimer une autorisation d'accès
+DELETE http://localhost:3000/api/professionnel/autorisation/1
+Content-Type: application/json
+
+{
+    "id_admin": 184
+}
+
+### Demander l'accès à un dossier
+POST http://localhost:3000/api/professionnel/demande-acces
+Content-Type: application/json
+
+{
+    "id_utilisateur": 184,
+    "id_dossier": 1153,
+    "motif": "Besoin d'accéder au dossier pour consultation"
+}
+
+### Traiter une demande d'accès (accepter)
+POST http://localhost:3000/api/professionnel/traiter-demande
+Content-Type: application/json
+
+{
+    "id_demande": 1,
+    "id_admin": 184,
+    "statut": "accepter",
+    "commentaire": "Accès accordé pour consultation"
+}
+
+### Traiter une demande d'accès (refuser)
+POST http://localhost:3000/api/professionnel/traiter-demande
+Content-Type: application/json
+
+{
+    "id_demande": 1,
+    "id_admin": 184,
+    "statut": "refuser",
+    "commentaire": "Accès refusé car non justifié"
+}
+
+### Traiter une demande d'accès (accepter) avec mot de passe
+POST http://localhost:3000/api/professionnel/traiter-demande
+Content-Type: application/json
+
+{
+    "id_demande": 1,
+    "id_admin": 184,
+    "statut": "accepter",
+    "commentaire": "Accès accordé pour consultation",
+    "password": "votre_mot_de_passe_admin"
+}
+
+### Traiter une demande d'accès (refuser) avec mot de passe
+POST http://localhost:3000/api/professionnel/traiter-demande
+Content-Type: application/json
+
+{
+    "id_demande": 1,
+    "id_admin": 184,
+    "statut": "refuser",
+    "commentaire": "Accès refusé car non justifié",
+    "password": "votre_mot_de_passe_admin"
+}
+
+### Vérifier les demandes d'accès en attente
+GET http://localhost:3000/api/professionnel/demandes-acces?statut=EN_ATTENTE 
