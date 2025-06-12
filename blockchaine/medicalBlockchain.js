@@ -17,6 +17,12 @@ const port = process.env.BLOCKCHAIN_PORT || 3001;
 const myUrl = `http://localhost:${port}`;
 
 /**
+ * @description creation d un transaction pour un block
+ */
+
+
+
+/**
  * @description fonction pour calculer le hash  d un block
  * @param {*} index index du block
  * @param {*} previousHash hash du block précédent
@@ -60,40 +66,63 @@ async function createGenesisBlock() {
  * @param {string} publicKey - Clé publique hex.
  * @param {string} secretKey - Clé AES pour chiffrer les données.
  * @returns {Promise<{ success?: string, error?: string }>}
- */
-async function addrecordBlockchain(dossier, signature, publicKey, secretKey) {
+ */ 
+async function addrecordBlockchain(dossier, transaction, signature, publicKey, secretKey) {
+  try {
+      if (!dossier || !transaction || !signature || !publicKey || !secretKey) {
+          return { error: "données manquantes" };
+      }
 
-    try {
-        if (!dossier || !signature || !publicKey || !secretKey) {
-            return { error: "donnee manquantes" }
-        }
-        // verification de la signature 
+      const dataStr = JSON.stringify(dossier);
+      const dataHash = SHA256(dataStr).toString();
+      const key = ec.keyFromPublic(publicKey, "hex");
 
-        const dataStr = JSON.stringify(dossier)
-        const dataHash = SHA256(dataStr).toString()
-        const key = ec.keyFromPublic(publicKey, "hex");
+      if (!key.verify(dataHash, signature)) {
+          return { error: "Signature invalide !" };
+      }
 
-        if (!key.verify(dataHash, signature)) {
-            return { error: "Signature invalide !" };
-        }
+      // Chiffrement
+      const dossierChiffre = CryptoJS.AES.encrypt(dataStr, secretKey).toString();
 
-        // 2. Chiffrer les données
-        const dossierChiffre = CryptoJS.AES.encrypt(dataStr, secretKey).toString();
+      // Dernier bloc pour récupérer index et previousHash
+      const latestBlock = await Block.findOne().sort({ index: -1 });
+      const newIndex = latestBlock ? latestBlock.index + 1 : 1;
+      const timestamp = new Date();
+      const previousHash = latestBlock ? latestBlock.hash : "0";
 
-        // 3. Enregistrer dans MongoDB (mempool)
-        const pendingRecord = new PendingRecord({
-            dossier: dossierChiffre,
-            signature,
-            publicKey,
-        });
-        await pendingRecord.save();
+      // Préparation des données
+      const data = {
+          dossier: dossierChiffre,
+          transaction,
+          signature,
+          publicKey
+      };
 
-        return { success: true, message: "Enregistrement en attente" }
-    } catch (error) {
-        return { error: error.message }
-    }
+      const hash = calculateHash(newIndex, timestamp, data, previousHash);
 
+      const newBlock = new Block({
+          index: newIndex,
+          timestamp,
+          transaction,
+          previousHash,
+          hash,
+          data: [data]  // Un seul dossier par bloc dans ce modèle
+      });
+
+      await newBlock.save();
+
+     
+      return {
+          success: true,
+          message: "Bloc ajouté à la blockchain sans minage.",
+          block: newBlock
+      };
+
+  } catch (error) {
+      return { error: error.message };
+  }
 }
+
 
 /**
  * Mine un nouveau bloc à partir des dossiers en attente et l'ajoute à la blockchain.
@@ -118,6 +147,7 @@ async function mineNewBlock() {
       // 3. Préparer les données du bloc
       const data = pendingRecords.map(record => ({
         dossier: record.dossier,
+        transaction: record.transaction,
         signature: record.signature,
         publicKey: record.publicKey,
       }));
@@ -129,6 +159,7 @@ async function mineNewBlock() {
       const newBlock = new Block({
         index: newIndex,
         timestamp,
+        transaction:pendingRecords[0].transaction,
         previousHash,
         hash,
         data,

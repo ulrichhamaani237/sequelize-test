@@ -12,10 +12,12 @@ mongoose.connect(DB_URI, {
 .then(() => console.log('Connexion MongoDB réussie ✅'))
 .catch(err => console.error('Erreur de connexion ❌:', err.message));
 
+
 // Schéma des blocs de la blockchain
 const BlockSchema = new mongoose.Schema({
   index: Number,
   timestamp: Date,
+  transaction: String,
   previousHash: String,
   hash: String,
   data: [
@@ -31,6 +33,7 @@ const Block = mongoose.model("Block", BlockSchema);
 // Schéma pour les dossiers en attente de validation (pool de transactions)
 const PendingRecordSchema = new mongoose.Schema({
   dossier: Object,
+  transaction: String,
   signature: String,
   publicKey: String,
   timestamp: { type: Date, default: Date.now }

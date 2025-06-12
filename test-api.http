@@ -1,13 +1,14 @@
+
 # POST http://localhost:5000/dossier/register HTTP/1.1
 # Content-Type: application/json
 
 # {
-#   "nom": "John4",
-#   "prenom": "Doe4",
-#   "email": "john4@example.com",
+#   "nom": "ulrich",
+#   "prenom": "haman",
+#   "email": "ulrichhaman@gmail.com",
 #   "mot_de_passe": "aaaaaaaa",
 #   "role": "admin",
-#   "id_hopital": "148",
+#   "id_hopital": "149",
 #   "autre_donnees": {
 #     "info": "autre donnzz"
 #   }
@@ -45,13 +46,34 @@
 
 # GET http://localhost:5000/dossier/getall
 
-
-# POST http://localhost:5000/dossier/addpatient/148 HTTP/1.1
+# POST http://localhost:5000/dossier/consultation HTTP/1.1
 # Content-Type: application/json
 
 # {
-#   "nom": "marcel",
-#   "prenom": "samia",
+#     "id_dossier": "1157",
+#     "id_utilisateur": "188",
+#     "detail": {
+#         "motif": "Maladie chronique",
+#         "traitement": "Traitement cardiaque",
+#         "observations": "premiere consultation"
+#     },
+#     "password": "aaaaaaaa"
+# }
+
+POST  http://localhost:5000/dossier/getconsultationforpatient/1170 HTTP/1.1
+Content-Type: application/json
+
+{
+    "id_utilisateur": "188",
+    "password": "aaaaaaaa"
+}
+
+# POST http://localhost:5000/dossier/addpatient/149 HTTP/1.1
+# Content-Type: application/json
+
+# { 
+#   "nom": "simona",
+#   "prenom": "kamgo",
 #   "date_naissance": "2004-01-01",
 #   "age": "18",
 #   "sexe": "Masculin",
@@ -59,9 +81,11 @@
 #   "adresse": "123 Rue de l'Hopital V",
 #   "nom_tuteur": "Tuteur2",
 #   "photo": "photo2.jpg",
-#   "id_utilisateur": "184",
+#   "id_utilisateur": "188",
+#   "email": "simonakamgo@gmail.com",
 #   "mot_de_passe": "aaaaaaaa",
-#   "tel": "+237 620410454"
+#   "password": "aaaaaaaa",
+#   "tel": "+237620410454"
 # }
 
 # /
@@ -147,15 +171,7 @@
  #GET  http://localhost:5000/dossier/dossiers-autorises/184 HTTP/1.1
 
 
-POST http://localhost:5000/dossier/demande-acces
-Content-Type: application/json
 
-{
-
-  "id_utilisateur": "181",
-  "id_dossier": "1148",
-  "motif": "Motif de la demande"
-}
 
 # PUT  http://localhost:5000/dossier/update/184 HTTP/1.1
 # Content-Type: application/json
@@ -187,4 +203,7 @@ Content-Type: application/json
 # }
 
 # GET http://localhost:5000/dossier/demandes-acces HTTP/1.1
+
+
+# GET http://localhost:5000/dossier/notification/182
 

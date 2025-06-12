@@ -8,7 +8,7 @@ const addLogs = async (data) => {
     if (!id_dossier || !id_utilisateur || !date_acces || !type_action || !operation_type || !dossier_username || !target_type || !details || !id_hopital) {
       throw new Error("Tous les champs sont requis");
     }
-    
+     
     const result = await query(
      `INSERT INTO historique_acces_dossier(
       id_dossier,
@@ -44,7 +44,7 @@ const addLogs = async (data) => {
       details: result.rows[0].details,
     }
 
-    global.socket.emit(`notification_hopital_${id_hopital}`, Notification);
+    // global.socket.emit(`notification_hopital_${id_hopital}`, Notification);
 
     return {
       success: true,

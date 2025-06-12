@@ -62,7 +62,7 @@ router.get("/getpersonnel/:id_utilisateur", getPersonnelById);
 router.get("/getpatient/:id_patient", getPatientById);
 router.post("/deleteconsultation", deleteConsultation);
 router.post("/getdatatable", getAllDataTables);
-router.get("/consultation/:id_dossier",getConsultation);
+router.post("/getconsultationforpatient/:id_dossier",getConsultation);
 router.post("/consultation",upload.single("file"), AjouterConsultation);
 router.post("/patient-autorisation-hopitale", getPatientAutorizeHopitale);
 router.get("/user", getUserDetail);
@@ -71,7 +71,6 @@ router.post("/loginpatient", loginpatient);
 router.post("/newpatient", createNewPatient);
 router.post("/logout", protectionRoute, logout);
 router.post("/logs",getLogs);
-router.get("/getconsultationforpatient/:id_patient", getconsultationforpatient);
 router.post(
   "/importDossierMedicale",
   upload.single("file"),

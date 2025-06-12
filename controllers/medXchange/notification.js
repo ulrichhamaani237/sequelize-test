@@ -64,17 +64,17 @@ const notifications = async (req, res) => {
     }
 
     const notification = await query(
-      "SELECT * FROM notification WHERE id_utilisateur = $1 ORDER BY create_time DESC LIMIT 20",
+      "SELECT * FROM notification WHERE id_utilisateur = $1 ORDER BY create_time DESC LIMIT 8",
       [userId]
     );
 
     // Formater les données pour qu'elles correspondent au format attendu par le frontend
     const formattedNotifications = notification.rows.map((notif) => ({
-      id: notif.id_utilisateur, // Assurez-vous que votre table a une colonne 'id'
+      id: notif.id,
       message: notif.message,
-      time: formatTimeAgo(notif.create_time), // Fonction à créer pour formater le temps
-      read: notif.read === true, // Assurez-vous que votre table a une colonne 'read'
-      type: notif.type || "system", // Utiliser un type par défaut si non spécifié
+      time: formatTimeAgo(notif.create_time),
+      read: notif.read === true,
+      type: notif.type || "system",
     }));
 
     return res.status(200).json({
@@ -188,115 +188,29 @@ function formatTimeAgo(date) {
   });
 }
 
-// const sendBulkNotifications = async (req, res) => {
-//   try {
-//     const { message, user_ids, type = 'system' } = req.body;
-
-//     // Validation des entrées
-//     if (!message || !user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Message et tableau d'IDs utilisateur sont obligatoires"
-//       });
-//     }
-
-//     // Vérification que tous les IDs sont valides
-//     const invalidIds = user_ids.filter(id => isNaN(id) || id <= 0);
-//     if (invalidIds.length > 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `IDs utilisateur invalides: ${invalidIds.join(', ')}`
-//       });
-//     }
-
-//     // Préparation des valeurs pour l'insertion multiple
-//     const values = user_ids.map(id => [id, message, new Date(), type, false]);
-//     const placeholders = values.map((_, i) =>
-//       `($${i*5 + 1}, $${i*5 + 2}, $${i*5 + 3}, $${i*5 + 4}, $${i*5 + 5})`
-//     ).join(',');
-
-//     // Insertion des notifications en une seule requête
-//     const response = await query(
-//       `INSERT INTO notification(id_utilisateur, message, create_time, type, read)
-//        VALUES ${placeholders}
-//        RETURNING *`,
-//       values.flat()
-//     );
-
-//     // Vérification du résultat de l'insertion
-//     if (response.rows.length !== user_ids.length) {
-//       return res.status(500).json({
-//         success: false,
-//         message: "Certaines notifications n'ont pas pu être créées"
-//       });
-//     }
-
-//     // Formater les notifications pour l'émission en temps réel
-//     const formattedNotifications = response.rows.map(notif => ({
-//       id: notif.id,
-//       message: notif.message,
-//       time: 'À l\'instant',
-//       read: false,
-//       type: notif.type || 'system'
-//     }));
-
-//     // Émettre les notifications à chaque utilisateur concerné
-//     response.rows.forEach(notif => {
-//       const formattedNotif = {
-//         id: notif.id,
-//         message: notif.message,
-//         time: 'À l\'instant',
-//         read: false,
-//         type: notif.type || 'system'
-//       };
-//       global.socket.emit(`notification_${notif.id_utilisateur}`, formattedNotif);
-//     });
-
-//     return res.status(201).json({
-//       success: true,
-//       message: `${response.rows.length} notifications créées avec succès`,
-//       data: formattedNotifications
-//     });
-
-//   } catch (error) {
-//     console.error("Erreur dans sendBulkNotifications:", error);
-
-//     // Gestion spécifique des erreurs de contrainte
-//     if (error.code === '23503') {
-//       const match = error.message.match(/Key \(id_utilisateur\)=\((\d+)\)/);
-//       const invalidUserId = match ? match[1] : 'inconnu';
-//       return res.status(400).json({
-//         success: false,
-//         message: `L'utilisateur avec ID ${invalidUserId} n'existe pas`
-//       });
-//     }
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Erreur serveur lors de la création des notifications"
-//     });
-//   }
-// };
-
 /**
- * @description Envoie des notifications à plusieurs utilisateurs
+ * @description Envoie une notification à un ou plusieurs utilisateurs
  * @param {string} message - Le message de notification
- * @param {number[]} userIds - Tableau d'IDs utilisateur
+ * @param {number|number[]} userIds - ID utilisateur unique ou tableau d'IDs utilisateur
  * @param {string} [type='system'] - Type de notification
+ * @param {Object} [data] - Données supplémentaires à inclure dans la notification
  * @returns {Promise<{success: boolean, data?: any[], message?: string}>}
  */
-async function sendBulkNotifications(message, userIds, type = "system") {
+async function sendNotification(message, userIds, type = "system", data = null) {
   try {
+    // Convertir en tableau si un seul ID est fourni
+    const userIdArray = Array.isArray(userIds) ? userIds : [userIds];
+
     // Validation des entrées
-    if (!message || !userIds || !Array.isArray(userIds) || userIds.length === 0) {
+    if (!message || !userIdArray || userIdArray.length === 0) {
       return {
         success: false,
-        message: "Message et tableau d'IDs utilisateur sont obligatoires",
+        message: "Message et ID(s) utilisateur sont obligatoires",
       };
     }
 
     // Filtrage des IDs valides (uniques et numériques)
-    const validUserIds = [...new Set(userIds)].filter(
+    const validUserIds = [...new Set(userIdArray)].filter(
       (id) => !isNaN(id) && id > 0
     );
 
@@ -336,24 +250,37 @@ async function sendBulkNotifications(message, userIds, type = "system") {
     const io = socketIO.getIO();
     if (io) {
       response.rows.forEach((notif) => {
-        io.to(`user_${notif.id_utilisateur}`).emit('notification', {
+        const notificationData = {
           id: notif.id,
           message: notif.message,
           time: "À l'instant",
           read: false,
           type: notif.type || "system",
-        });
+        };
+
+        // Ajouter les données supplémentaires si présentes
+        if (data) {
+          notificationData.data = data;
+        }
+
+        // Envoyer à la salle spécifique de l'utilisateur
+        io.to(`user_${notif.id_utilisateur}`).emit('notification', notificationData);
+
+        // Si c'est une notification admin, envoyer aussi à la salle admin
+        if (type === 'admin' || type === 'demande_acces') {
+          io.to('admin_room').emit('admin_notification', notificationData);
+        }
       });
     }
 
     return {
       success: true,
       data: response.rows,
-      message: `${response.rows.length} notifications envoyées`,
+      message: `${response.rows.length} notification(s) envoyée(s)`,
     };
 
   } catch (error) {
-    console.error("Erreur dans sendBulkNotifications:", error);
+    console.error("Erreur dans sendNotification:", error);
 
     if (error.code === "23503") {
       const match = error.message.match(/Key \(id_utilisateur\)=\((\d+)\)/);
@@ -384,5 +311,5 @@ module.exports = {
   envoyerNotificationMultiUtilisateurs,
   notifications,
   sendNotifications,
-  sendBulkNotifications,
+  sendNotification,
 };

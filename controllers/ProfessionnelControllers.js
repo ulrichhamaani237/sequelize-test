@@ -13,6 +13,7 @@ const ec = new EC("secp256k1");
 const crypto = require("crypto");
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
+const { sendNotification } = require('./medXchange/notification');
 
 
 const impoterProffessionnelToExcel = async (req, res) => {
@@ -256,37 +257,89 @@ const createProfessionnel = async (req, res) => {
     });
   }
 };
-
+ 
 /**
  * Ajouter une autorisation d'accès à un dossier spécifique pour un professionnel
  */
 const ajouterAutorisationDossier = async (req, res) => {
   try {
-    const { id_utilisateur, id_dossier, id_admin, password } = req.body;
+    const { id_utilisateur, code_access, password } = req.body;
 
-    // Vérification des paramètres
-    if (!id_utilisateur || !id_dossier || !id_admin || !password) {
+    if (!id_utilisateur || !code_access || !password) {
       return res.status(400).json({
         success: false,
         message: 'Paramètres manquants'
       });
     }
 
-    // Récupérer les informations de l'admin et de l'utilisateur
-    const [adminInfo, userInfo] = await Promise.all([
-      query('SELECT * FROM utilisateur WHERE id_utilisateur = $1', [id_admin]),
-      query('SELECT * FROM utilisateur WHERE id_utilisateur = $1', [id_utilisateur])
-    ]);
-
-    if (!adminInfo.rows[0] || !userInfo.rows[0]) {
+    // Vérifier le code d'accès et récupérer le dossier
+    const patient = await query(`SELECT * FROM patient WHERE code_access IS NOT NULL`, []);
+    if (!patient.rows.length) {
       return res.status(404).json({
         success: false,
-        message: 'Utilisateur ou admin non trouvé'
+        message: 'Aucun patient trouvé avec un code d\'accès'
       });
     }
 
-    // Vérifier le mot de passe de l'admin
-    const validPassword = await bcrypt.compare(password, adminInfo.rows[0].mot_de_passe_hash);
+    // Vérifier le hash du code d'accès pour chaque patient
+    let patientFound = null;
+    for (const p of patient.rows) {
+      const isValidCode = await bcrypt.compare(code_access, p.code_access);
+      if (isValidCode) {
+        patientFound = p;
+        break;
+      }
+    }
+
+    if (!patientFound) {
+      return res.status(404).json({
+        success: false,
+        message: 'Code d\'accès invalide'
+      });
+    }
+
+    // Vérifier si le dossier médical existe pour ce patient
+    const dossierCheck = await query(`
+      SELECT id_dossier FROM dossier_medical_global 
+      WHERE id_patient = $1
+    `, [patientFound.id_patient]);
+
+    if (!dossierCheck.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dossier médical non trouvé pour ce patient'
+      });
+    }
+
+    const id_dossier = dossierCheck.rows[0].id_dossier;
+
+    // Vérifier si l'accès existe déjà
+    const existCheck = await query(`
+      SELECT * FROM utilisateur_dosssier_autorise 
+      WHERE id_utilisateur = $1 AND id_dossier = $2 
+    `, [id_utilisateur, id_dossier]);
+
+    if (existCheck.rows.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'Vous avez déjà accès à ce dossier',
+        donnees: patientFound
+      });
+    }
+
+    // Récupérer les infos utilisateur
+    const userInfo = await query(`SELECT * FROM utilisateur WHERE id_utilisateur = $1`, [id_utilisateur]);
+    if (!userInfo.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur non trouvé'
+      });
+    }
+
+    const user = userInfo.rows[0];
+
+    // Vérifier le mot de passe de l'utilisateur
+    const validPassword = await bcrypt.compare(password, user.mot_de_passe_hash);
     if (!validPassword) {
       return res.status(401).json({
         success: false,
@@ -294,154 +347,80 @@ const ajouterAutorisationDossier = async (req, res) => {
       });
     }
 
-    // Déchiffrer la clé privée de l'admin
-    let decryptedPrivateKey;
-    try {
-      const encryptedData = adminInfo.rows[0].cle_prive;
-      if (!encryptedData) {
-        return res.status(400).json({
-          success: false,
-          message: 'Clé privée non trouvée pour l\'administrateur'
-        });
-      }
+    // Chiffrer le code d'accès avec le mot de passe
+    const encryptedCodeAccess = CryptoJS.AES.encrypt(code_access, password).toString();
 
-      // Vérifier le format de la clé chiffrée
-      const parts = encryptedData.split(':');
-      if (parts.length !== 3) {
-        return res.status(400).json({
-          success: false,
-          message: 'Format de clé privée invalide'
-        });
-      }
+    // Stocker le code d'accès chiffré dans la table utilisateur
+    await query(`
+      UPDATE utilisateur 
+      SET code_access_dossier_hash = $1
+      WHERE id_utilisateur = $2
+    `, [encryptedCodeAccess, id_utilisateur]);
 
-      const [saltHex, ivHex, encryptedKey] = parts;
-      const salt = Buffer.from(saltHex, 'hex');
-      const iv = Buffer.from(ivHex, 'hex');
-      const derivedKey = crypto.scryptSync(password, salt, 32);
-      const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
-      
-      decryptedPrivateKey = decipher.update(encryptedKey, 'hex', 'utf8') + 
-                           decipher.final('utf8');
-
-      // Vérifier que la clé déchiffrée est un hexadécimal valide
-      if (!/^[0-9a-fA-F]+$/.test(decryptedPrivateKey)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Clé privée invalide après déchiffrement'
-        });
-      }
-    } catch (error) {
-      console.error('Erreur de déchiffrement:', error);
-      return res.status(400).json({
-        success: false,
-        message: 'Erreur lors du déchiffrement de la clé privée'
-      });
-    }
-
-    // Vérifier si l'autorisation existe déjà
-    const existCheck = await query(`
-      SELECT * FROM utilisateur_dosssier_autorise 
-      WHERE id_utilisateur = $1 AND id_dossier = $2 
-    `, [id_utilisateur, id_dossier]);
-
-    if (existCheck.rows.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cette autorisation existe déjà'
-      });
-    }
-
-    // Créer l'objet d'autorisation pour la blockchain
+    // Préparer les données pour la blockchain
     const autorisationData = {
-      type: 'AUTORISATION_DOSSIER',
+      type: 'ACCES_DOSSIER',
       id_utilisateur,
       id_dossier,
-      id_admin,
       timestamp: new Date().toISOString(),
       metadata: {
-        nom_utilisateur: userInfo.rows[0].nom + ' ' + userInfo.rows[0].prenom,
-        role_utilisateur: userInfo.rows[0].role,
-        nom_admin: adminInfo.rows[0].nom + ' ' + adminInfo.rows[0].prenom
+        nom_utilisateur: user.nom + ' ' + user.prenom,
+        role_utilisateur: user.role,
+        code_access: code_access
       }
     };
 
-    // Signer les données avec la clé privée déchiffrée
-    const dataStr = JSON.stringify(autorisationData);
-    const dataHash = SHA256(dataStr).toString();
-    const key = ec.keyFromPrivate(decryptedPrivateKey);
-    const signature = key.sign(dataHash).toDER('hex');
-
-    // Enregistrer dans la blockchain
-    const blockchainResult = await addrecordBlockchain(
-      autorisationData,
-      signature,
-      adminInfo.rows[0].cle_publique,
-      process.env.BLOCKCHAIN_SECRET_KEY
-    );
-
-    if (blockchainResult.error) {
-      return res.status(500).json({
-        success: false,
-        message: 'Erreur lors de l\'enregistrement dans la blockchain',
-        error: blockchainResult.error
-      });
-    }
-
-    // Ajouter l'autorisation dans la base de données
+    // Ajouter l'autorisation
     const result = await query(`
       INSERT INTO utilisateur_dosssier_autorise 
-      (id_utilisateur, id_dossier, autorisation_donnee_par, date_autorisation) 
-      VALUES ($1, $2, $3, CURRENT_DATE) 
+      (id_utilisateur, id_dossier, date_autorisation) 
+      VALUES ($1, $2, CURRENT_DATE) 
       RETURNING *
-    `, [id_utilisateur, id_dossier, id_admin]);
+    `, [id_utilisateur, id_dossier]);
 
-    // Enregistrer dans l'historique d'accès
+    // Enregistrer l'historique
     await query(`
       INSERT INTO historique_acces_dossier 
       (id_dossier, id_utilisateur, date_acces, type_action, operation_type, 
-       details, signature, id_hopital, public_key, block_hash)
-      VALUES ($1, $2, CURRENT_TIMESTAMP, 'AUTORISATION', 'GRANT',
-              $3, $4, $5, $6, $7)
+       details, id_hopital)
+      VALUES ($1, $2, CURRENT_TIMESTAMP, 'ACCES_CODE', 'GRANT',
+              $3, $4)
     `, [
       id_dossier,
       id_utilisateur,
       JSON.stringify(autorisationData),
-      signature,
-      userInfo.rows[0].id_hopital,
-      adminInfo.rows[0].cle_publique,
-      blockchainResult.blockHash || null
+      user.id_hopital
     ]);
 
-    // Créer une notification pour l'utilisateur
+    // Notification
     await query(`
       INSERT INTO notification 
       (id_utilisateur, message, type, create_time)
-      VALUES ($1, $2, 'autorisation', CURRENT_DATE)
+      VALUES ($1, $2, 'acces_dossier', CURRENT_DATE)
     `, [
       id_utilisateur,
-      `Vous avez reçu l'accès au dossier médical #${id_dossier}`
+      `Accès au dossier #${id_dossier} accordé`
     ]);
 
-    // Envoyer la notification en temps réel via Socket.IO
+    // Socket notification
     if (socketIO.getIO()) {
       socketIO.getIO().to(`user_${id_utilisateur}`).emit('notification', {
-        type: 'autorisation',
-        message: `Vous avez reçu l'accès au dossier médical #${id_dossier}`,
+        type: 'acces_dossier',
+        message: `Accès au dossier #${id_dossier} accordé`,
         data: {
-          ...result.rows[0],
-          blockchain: blockchainResult
+          ...result.rows[0]
         }
       });
     }
 
     res.status(201).json({
       success: true,
-      message: 'Autorisation ajoutée avec succès',
-      autorisation: result.rows[0],
-      blockchain: blockchainResult
+      message: 'Accès accordé',
+      donnees: patientFound,
+      autorisation: result.rows[0]
     });
   } catch (error) {
-    console.error("Erreur lors de l'ajout de l'autorisation:", error);
+    console.error("Erreur accès dossier:", error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -749,26 +728,24 @@ const demanderAccesDossier = async (req, res) => {
       WHERE role = 'admin'
     `);
 
-    // Créer des notifications pour les admins
-    for (const admin of admins.rows) {
-      await query(`
-        INSERT INTO notification 
-        (id_utilisateur, message, type, create_time)
-        VALUES ($1, $2, 'demande_acces', CURRENT_DATE)
-      `, [
-        admin.id_utilisateur,
-        `Nouvelle demande d'accès au dossier #${id_dossier}`
-      ]);
-
-      // Notification en temps réel pour les admins
-      if (socketIO.getIO()) {
-        socketIO.getIO().to(`user_${admin.id_utilisateur}`).emit('notification', {
-          type: 'demande_acces',
-          message: `Nouvelle demande d'accès au dossier #${id_dossier}`,
-          data: result.rows[0]
-        });
+    // Préparer les données de la notification
+    const notificationData = {
+      ...result.rows[0],
+      demandeur: {
+        nom: userInfo.rows[0].nom,
+        prenom: userInfo.rows[0].prenom,
+        role: userInfo.rows[0].role
       }
-    }
+    };
+
+    // Envoyer les notifications aux administrateurs
+    const adminIds = admins.rows.map(admin => admin.id_utilisateur);
+    await sendNotification(
+      `Nouvelle demande d'accès au dossier #${id_dossier}`,
+      adminIds,
+      'demande_acces',
+      notificationData
+    );
 
     res.status(201).json({
       success: true,

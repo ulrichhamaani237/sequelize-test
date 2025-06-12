@@ -34,7 +34,7 @@ const {
 router.get('/dossiers-disponibles/:id_utilisateur', getDossiersDisponiblesPourDemande);
 router.post('/importPersonnel', upload.single('file'), impoterProffessionnelToExcel);
 router.post('/create', createProfessionnel);
-router.put('/update id_utilisateur', updateProfessionnel);
+router.put('/update/:id_utilisateur', updateProfessionnel);
 router.post('/autorisation', ajouterAutorisationDossier);
 router.delete('/autorisation', supprimerAutorisationDossier);
 router.get('/dossiers-autorises/:id_utilisateur', getDossiersAutorises);
