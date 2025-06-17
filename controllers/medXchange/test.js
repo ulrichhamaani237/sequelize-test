@@ -963,8 +963,54 @@ const AjouterTraitement = async (req, res) => {
     }
 }
 
+const Addrendezvous = async (req, res) => {
+    const { date } = req.body;
+    const { id_consultation } = req.params;
+    
+    try {
+        if (!date || !id_consultation) {
+            return res.status(400).json({
+                success: false,
+                message: "Tous les champs sont requis"
+            });
+        }
+
+        const daterdv = new Date(date);
+
+        // Use RETURNING * to get the updated row
+        const response = await query(
+            `UPDATE consultation 
+             SET prochain_rendez_vous = $1 
+             WHERE id_consultation = $2 
+             RETURNING *`, 
+            [daterdv, id_consultation]
+        ); 
+
+        // Check if any rows were affected
+        if (response.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Aucune consultation trouvée avec cet ID'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Rendez-vous enregistré avec succès',
+            data: response.rows[0]
+        });
+    } catch (error) {
+        console.error('Error in Addrendezvous:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de l\'enregistrement du rendez-vous',
+            error: error.message
+        });
+    }
+}
+
 const AjouterConsultation = async (req, res) => {
-    const { id_dossier, id_utilisateur, detail, password } = req.body;
+    const { id_dossier, id_utilisateur, detail, password} = req.body;
     const image = req.file;
     const pdfCarnet = req.file;
 
@@ -973,7 +1019,24 @@ const AjouterConsultation = async (req, res) => {
         return res.status(400).json({ error: "Tous les champs sont requis" });
     }
 
+  
     try {
+
+        if (detail.date) {
+
+            const result = await query(
+                'UPDATE consultation SET rendezvous = $1 WHERE id_dossier = $2 AND id_utilisateur = $3',
+                [rendezvous, id_dossier, id_utilisateur]
+            );        
+            await envoyerNotificationUtilisateur(
+                id_utilisateur,
+                `Nouveau rendez-vous ajouté au dossier ${id_dossier}`
+            );
+            return res.status(201).json(result.rows[0]);
+    
+        }
+    
+
         const [userCheck, patientCheck] = await Promise.all([
             query('SELECT * FROM utilisateur WHERE id_utilisateur = $1', [id_utilisateur]),
             query('SELECT p.code_access FROM patient p JOIN dossier_medical_global d ON p.id_patient = d.id_patient WHERE d.id_dossier = $1', [id_dossier])
@@ -1681,6 +1744,7 @@ const getPatientsForshearch = async (req, res) => {
 
 
 module.exports = {
+    Addrendezvous,
     getdossier,
     getPatientsForshearch,
     getAuthorisezeHopital,

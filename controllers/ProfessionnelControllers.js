@@ -1,6 +1,4 @@
-const { ProfessionnelSante } = require('../models');
 const xlsx = require('xlsx');
-const upload = require('../uploads/uploadProfess');
 const { query } = require('../config/db');
 const socketIO = require('../socket');
 const path = require("path");

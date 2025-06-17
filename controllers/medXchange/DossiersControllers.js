@@ -102,14 +102,11 @@ const getPersonnelById = async (req, res) => {
  */
 const editPersonnel = async (req, res) => {
   try {
-    const { nom, prenom, email, mot_de_passe_hash, role, specialite, sexe } = req.body;
+    const { nom, prenom, email, role, specialite, sexe } = req.body;
     const id_utilisateur = req.params.id_utilisateur;
-    if (!id_utilisateur || !nom || !prenom || !email || !mot_de_passe_hash || !role || !specialite || !sexe) {
-      return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
-    }
     const personnel = await query(
-      `UPDATE utilisateur SET nom = $1, prenom = $2, email = $3, mot_de_passe_hash = $4, role = $5, specialite = $6,sexe = $7 WHERE id_utilisateur = $8 RETURNING *`,
-      [nom, prenom, email, mot_de_passe_hash, role, specialite, sexe, id_utilisateur]
+      `UPDATE utilisateur SET nom = $1, prenom = $2, email = $3, role = $4, specialite = $5,sexe = $6 WHERE id_utilisateur = $7 RETURNING *`,
+      [nom, prenom, email, role, specialite, sexe, id_utilisateur]
     );
     if (!personnel.rows.length) {
       return res.status(404).json({ success: false, message: "Personnel non trouvé" });

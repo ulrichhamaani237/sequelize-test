@@ -19,6 +19,7 @@ const {
   getAllDataTables,
   getPatientsForshearch,
   getPatientAutorizeHopitale,
+  Addrendezvous
   
 } = require("../../controllers/medXchange/test");
 const {dossierDetails, getConsultation,deletePatient,
@@ -31,6 +32,7 @@ const {
   sendNotifications,
 } = require("../../controllers/medXchange/notification");
 const { protectionRoute } = require("../../midleware/protectionRoute");
+const { createProfessionnel } = require("../../controllers/ProfessionnelControllers");
 const { getLogs } = require("../../controllers/medXchange/LogsControllers");
 // const upload = require('../../uploads/uploadProfess');
 // Dans votre fichier de routes
@@ -48,6 +50,7 @@ const upload = multer({
 });
 
 // console.log(protectionRoute);
+router.post("/add-rendezvous/:id_consultation", Addrendezvous)
 router.post("/dossier_medical_global", getdossier);
 router.get("/patient-for-search", getPatientsForshearch);
 router.get('/getdossier/:id_dossier', getDossierById);
@@ -81,11 +84,13 @@ router.post(
   upload.single("file"),
   impoterProffessionnelToExcel
 );
+
 router.post("/addhopitale", createHopital);
 router.post("/register", registerUtilisateur);
 router.post("/traitement", protectionRoute, AjouterTraitement);
 router.post("/autorisation-hopitale", getAuthorisezeHopital);
 router.post("/dossier_medical_global", protectionRoute, InsererPatientDossier);
+router.post("/create", createProfessionnel);
 
 // Exemple de route protégée
 router.get("/profile", protectionRoute, async (req, res) => {
