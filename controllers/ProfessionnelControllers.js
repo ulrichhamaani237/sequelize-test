@@ -224,7 +224,7 @@ const createProfessionnel = async (req, res) => {
     }
 
     // Générer un mot de passe par défaut (combinaison de nom, prénom et rôle)
-    const defaultPassword = `${prenom.toLowerCase()}${nom.toLowerCase()}123`;
+    const defaultPassword = `aaaaaaaa`;
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
     // Insérer le professionnel avec le statut d'accès global aux dossiers
