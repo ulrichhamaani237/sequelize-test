@@ -46,19 +46,19 @@
 
 # GET http://localhost:5000/dossier/getall
 
-#  POST http://localhost:5000/dossier/consultation HTTP/1.1
-#  Content-Type: application/json
+ POST http://localhost:5000/dossier/consultation HTTP/1.1
+ Content-Type: application/json
 
-#  {
-#     "id_dossier": "1157",
-#      "id_utilisateur": "188",
-#      "detail": {
-#          "motif": "Maladie chronique",
-#          "traitement": "Traitement cardiaque",
-#          "observations": "premiere consultation"
-#      },
-#      "password": "aaaaaaaa"
-#  }
+ {
+    "id_dossier": "1157",
+     "id_utilisateur": "188",
+     "detail": {
+         "motif": "Maladie chronique",
+         "traitement": "Traitement cardiaque",
+         "observations": "premiere consultation"
+     },
+     "password": "aaaaaaaa"
+ }
 
 # POST  http://localhost:5000/dossier/getconsultationforpatient/1170 HTTP/1.1
 # Content-Type: application/json
@@ -68,25 +68,25 @@
 #     "password": "aaaaaaaa"
 # }
 
-POST http://localhost:5000/dossier/addpatient/149 HTTP/1.1
-Content-Type: application/json
+# POST http://localhost:5000/dossier/addpatient/149 HTTP/1.1
+# Content-Type: application/json
 
-{ 
-  "nom": "maria",
-  "prenom": "Ange",
-  "date_naissance": "2004-01-01",
-  "age": "18",
-  "sexe": "Masculin",
-  "taille": "180",
-  "adresse": "123 Rue de l'Hopital V",
-  "nom_tuteur": "Tuteur2",
-  "photo": "photo2.jpg",
-  "id_utilisateur": "188",
-  "email": "simonakamgb20d9o@gmail.com",
-  "mot_de_passe": "aaaaaaaa",
-  "password": "aaaaaaaa",
-  "tel": "+237620410454"
-}
+# { 
+#   "nom": "maria",
+#   "prenom": "Ange",
+#   "date_naissance": "2004-01-01",
+#   "age": "18",
+#   "sexe": "Masculin",
+#   "taille": "180",
+#   "adresse": "123 Rue de l'Hopital V",
+#   "nom_tuteur": "Tuteur2",
+#   "photo": "photo2.jpg",
+#   "id_utilisateur": "188",
+#   "email": "simonakamgb20d9o@gmail.com",
+#   "mot_de_passe": "aaaaaaaa",
+#   "password": "aaaaaaaa",
+#   "tel": "+237620410454"
+# }
 
 # /
 # POST https://medxchange-backend.onrender.com/dossier/loginpatient
