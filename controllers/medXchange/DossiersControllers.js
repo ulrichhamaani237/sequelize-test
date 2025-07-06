@@ -14,10 +14,8 @@ const crypto = require("crypto");
 const jwt = require('jsonwebtoken');
 const { sendSms } = require("../../helpers/sendMessage");
 const CryptoJS = require("crypto-js");
-
-
-
-
+const {Web3} = require("web3");
+const web3 = new Web3("HTTP://127.0.0.1:7545");
 /**
  * 
  * @param {*} req 
@@ -43,13 +41,16 @@ const addPersonnel = async (req, res) => {
       return res.status(400).json({ success: false, message: "Tous les champs sont obligatoires" });
     }
 
+    const accounts = await web3.eth.getAccounts();
+    const randomAddress = accounts[Math.floor(Math.random() * accounts.length)];
+
     const motDePasseHash = await bcrypt.hash(mot_de_passe_hash, 10);
 
     const personnel = await query(
-      `INSERT INTO utilisateur(nom, prenom, email,mot_de_passe_hash,role,id_hopital,specialite,sexe)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
+      `INSERT INTO utilisateur(nom, prenom, email,mot_de_passe_hash,role,id_hopital,specialite,sexe,adresse)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
       `,
-      [nom, prenom, email, motDePasseHash, role, id_hopital, specialite, sexe]
+      [nom, prenom, email, motDePasseHash, role, id_hopital, specialite, sexe,randomAddress]
     )
 
     if (!personnel.rows.length) {
@@ -173,6 +174,8 @@ const addPatient = async (req, res) => {
     const id_hopital = req.params.id_hopital;
     const code_access = generateCodeAccess();
     const code_access_hash = await bcrypt.hash(code_access, 10);
+    const accounts = await web3.eth.getAccounts();
+    const randomAddress = accounts[Math.floor(Math.random() * accounts.length)];
 
     const requiredFields = {
       id_hopital, nom, prenom, date_naissance, sexe, taille,
@@ -224,7 +227,7 @@ const addPatient = async (req, res) => {
 
     // Envoi du SMS avec le code d'accès en clair
     try {
-      const message = `Bonjour ${prenom}, votre code d'accès au dossier médical est : ${code_access}`;
+      const message = `Bonjour  ${prenom} ${nom},  votre code d'accès au dossier médical est : ${code_access}`;
       await sendSms(tel, message);
     } catch (smsError) {
       return res.status(500).json({
@@ -240,11 +243,11 @@ const addPatient = async (req, res) => {
     const patientInsert = await query(`
       INSERT INTO patient 
       (nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, 
-      sexe, age, taille, photo, tel, email, password, is_paid, code_access)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      sexe, age, taille, photo, tel, email, password, is_paid, code_access,adresse_blochain)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,$16)
       RETURNING *`,
       [nom, prenom, date_naissance, nom_tuteur, id_hopital, adresse, sexe, age,
-        taille, photo, tel, email, hashedPassword, is_paid ?? false, code_access_hash]
+        taille, photo, tel, email, hashedPassword, is_paid ?? false, code_access_hash,randomAddress]
     );
 
     const patient = patientInsert.rows[0];
@@ -270,57 +273,14 @@ const addPatient = async (req, res) => {
       VALUES ($1, $2, $3, $4)
       RETURNING *`, [dossier.id_dossier, id_utilisateur, new Date(), detailInit]);
 
-    // Préparer données à enregistrer dans la blockchain
-    const blockChainData = {
-      type: 'Initiale',
-      date: new Date().toISOString(),
-      detail: 'Création du dossier médical',
-      id_dossier: dossier.id_dossier,
-      id_utilisateur: id_utilisateur,
-      action: 'creation_dossier'
-    };
-
-    const transaction = `Creation du dossier medical - Patient: ${patient.nom} ${patient.prenom} - ${new Date().toISOString()}`;
-
-    // Sérialiser le bloc en clair (chaîne JSON stable)
-    const blockDataString = JSON.stringify(blockChainData);
-
-    // Calcul du hash du message à signer
-    const messageHash = crypto.createHash('sha256').update(blockDataString).digest();
-
-    // Génération de la signature à partir de la clé privée déchiffrée
-    const privateKey = ec.keyFromPrivate(decryptedPrivateKey, 'hex');
-    const signature = privateKey.sign(messageHash).toDER('hex');
-
-    // Vérification avec la clé publique
-    const publicKey = ec.keyFromPublic(user.cle_publique, 'hex');
-    const isVerified = publicKey.verify(messageHash, signature);
-
-    if (!isVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Échec de la vérification de la signature sur les données du bloc"
-      });
-    }
-
-    // Enregistrement dans la blockchain
-    const result = await addrecordBlockchain(
-      blockChainData,
-      transaction,
-      signature,
-      user.cle_publique,
-      decryptedPrivateKey
-    );
-
-    return res.status(201).json({
+      return res.status(201).json({
       success: true,
       message: "Patient et dossier médical créés avec succès",
       data: {
-        ...patient,
+        patient,
         dossier,
         consultation: consultation.rows[0]
-      },
-      mined: result
+      }
     });
 
   } catch (error) {

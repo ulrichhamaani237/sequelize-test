@@ -12,6 +12,9 @@ const crypto = require("crypto");
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const { sendNotification } = require('./medXchange/notification');
+const {Web3} = require("web3");
+const web3 = new Web3("HTTP://127.0.0.1:7545");
+const { autoriserAcces } = require('../smart-consensus-medical/contract.service');
 
 
 const impoterProffessionnelToExcel = async (req, res) => {
@@ -223,17 +226,50 @@ const createProfessionnel = async (req, res) => {
       });
     }
 
-    // Générer un mot de passe par défaut (combinaison de nom, prénom et rôle)
+    // 1. Adresse blockchain aléatoire depuis Ganache
+    const accounts = await web3.eth.getAccounts();
+    const randomAddress = accounts[Math.floor(Math.random() * accounts.length)];
+
+    // 2. Mot de passe par défaut
     const defaultPassword = `aaaaaaaa`;
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-    // Insérer le professionnel avec le statut d'accès global aux dossiers
+    // 3. Génération de la paire de clés ECDSA
+    const keyPair = ec.genKeyPair();
+    const publicKey = keyPair.getPublic("hex");
+    const privateKey = keyPair.getPrivate("hex");
+
+    // 4. Chiffrement de la clé privée avec AES-256 (utilise le mot de passe par défaut)
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(16);
+    const derivedKey = crypto.scryptSync(defaultPassword, salt, 32);
+    const cipher = crypto.createCipheriv("aes-256-cbc", derivedKey, iv);
+    let encryptedPrivateKey = cipher.update(privateKey, "utf8", "hex");
+    encryptedPrivateKey += cipher.final("hex");
+    const encryptedData = `${salt.toString("hex")}:${iv.toString("hex")}:${encryptedPrivateKey}`;
+
+    // 5. Insertion du professionnel
     const result = await query(`
-      INSERT INTO utilisateur 
-      (nom, prenom, email, mot_de_passe_hash, role, id_hopital, specialite, sexe,access_record) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+      INSERT INTO utilisateur (
+        nom, prenom, email, mot_de_passe_hash, role, id_hopital,
+        specialite, sexe, access_record, adresse_blochain, cle_publique, cle_prive
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
-    `, [nom, prenom, email, hashedPassword, role, id_hopital, specialite, sexe, access_record || false]);
+    `, [
+      nom,
+      prenom,
+      email,
+      hashedPassword,
+      role,
+      id_hopital,
+      specialite,
+      sexe,
+      access_record || false,
+      randomAddress,
+      publicKey,
+      encryptedData
+    ]);
+
 
     if (result.rows.length === 0) {
       throw new Error("Erreur lors de la création du professionnel de santé");
@@ -244,7 +280,8 @@ const createProfessionnel = async (req, res) => {
       message: 'Professionnel de santé créé avec succès',
       professionnel: {
         ...result.rows[0],
-        mot_de_passe_defaut: defaultPassword
+        mot_de_passe_defaut: defaultPassword,
+        cle_publique: publicKey
       }
     });
   } catch (error) {
@@ -375,6 +412,8 @@ const ajouterAutorisationDossier = async (req, res) => {
       VALUES ($1, $2, CURRENT_DATE) 
       RETURNING *
     `, [id_utilisateur, id_dossier]);
+    console.log('info user is', user);
+    await autoriserAcces(user.adresse_blochain, 60);
 
     // Enregistrer l'historique
     await query(`

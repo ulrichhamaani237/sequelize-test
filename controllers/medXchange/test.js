@@ -19,6 +19,393 @@ const CryptoJS = require('crypto-js');
 const { Web3 } = require('web3');
 const web3 = new Web3('HTTP://127.0.0.1:7545');
 const BN = require('bn.js');
+const {marquerPaiement, verifierAcces, validerFormatFHIR, voterConsensus} = require('../../smart-consensus-medical/contract.service');
+
+
+
+
+
+
+
+const registerUtilisateur = async (req, res) => {
+    const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
+    try {
+
+        if(!nom || !prenom || !email || !mot_de_passe || !role || !id_hopital){
+            return res.status(400).json({
+                success: false,
+                message: 'Tous les champs sont obligatoires'
+            })
+        }
+
+        const accounts = await web3.eth.getAccounts();
+        const randomAddress = accounts[Math.floor(Math.random() * accounts.length)];
+
+         
+        
+        // Hachage du mot de passe
+        const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
+
+        // Génération de la paire de clés ECDSA
+        const keyPair = ec.genKeyPair();
+        const publicKey = keyPair.getPublic("hex");
+        const privateKey = keyPair.getPrivate("hex");
+
+        // Chiffrement de la clé privée avec AES-256
+        const salt = crypto.randomBytes(16);
+        const iv = crypto.randomBytes(16);
+        const derivedKey = crypto.scryptSync(mot_de_passe, salt, 32); // Clé dérivée synchronement
+
+        const cipher = crypto.createCipheriv("aes-256-cbc", derivedKey, iv);
+        let encryptedPrivateKey = cipher.update(privateKey, "utf8", "hex");
+        encryptedPrivateKey += cipher.final("hex");
+
+        const encryptedData = `${salt.toString("hex")}:${iv.toString("hex")}:${encryptedPrivateKey}`;
+
+        // Insertion de l'utilisateur
+        const sql = `
+      INSERT INTO utilisateur (
+        nom, prenom, email, mot_de_passe_hash,
+        role, id_hopital, adresse_blochain, autre_donnees,
+        cle_publique, cle_prive
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id_utilisateur, nom, email, role
+    `;
+
+        const { rows } = await query(sql, [
+            nom,
+            prenom,
+            email,
+            motDePasseHash,
+            role,
+            id_hopital,
+            randomAddress,
+            autre_donnees || null,
+            publicKey,
+            encryptedData,
+        ]);
+
+        if (rows.length === 0) {
+            return res.status(500).json({ error: "Échec de l'insertion de l'utilisateur" });
+        }
+
+        const newUser = rows[0];
+
+        // Création du token JWT
+        const token = jwt.sign(
+            {
+                id_utilisateur: newUser.id_utilisateur,
+                email: newUser.email,
+                role: newUser.role,
+            },
+            process.env.TOKEN_KEY,
+            { expiresIn: "30d" }
+        );
+
+        // Sauvegarde du token dans la BDD
+        await query("UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2", [
+            token,
+            newUser.id_utilisateur,
+        ]);
+
+        // Réponse
+        res.status(201).json({
+            success: true,
+            message: "Utilisateur enregistré avec succès et clés blockchain générées",
+            utilisateur: {
+                ...newUser,
+                cle_publique: publicKey,
+            },
+            token,
+        });
+    } catch (error) {
+        console.error("Erreur lors de l'inscription:", error);
+
+        if (error.code === "42703") {
+            return res.status(500).json({
+                error: "Erreur de configuration de la base de données (colonne manquante)",
+                success: false,
+            });
+        } else if (error.code === "23505") {
+            return res.status(409).json({
+                error: "Email déjà utilisé",
+                success: false,
+            });
+        }
+
+        res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message,
+            success: false,
+        });
+    }
+};
+
+
+
+
+
+
+const AjouterConsultation = async (req, res) => {
+    const { id_dossier, id_utilisateur, detail, password } = req.body;
+    const image = req.file;
+    const pdfCarnet = req.file;
+
+    if (!id_dossier || !id_utilisateur || !detail || !password) {
+        return res.status(400).json({ error: "Tous les champs sont requis" });
+    }
+
+    try {
+        // Gestion des rendez-vous (comme avant)
+        if (detail.date) {
+            const result = await query(
+                'UPDATE consultation SET rendezvous = $1 WHERE id_dossier = $2 AND id_utilisateur = $3',
+                [detail.rendezvous, id_dossier, id_utilisateur]
+            );
+            await envoyerNotificationUtilisateur(
+                id_utilisateur,
+                `Nouveau rendez-vous ajouté au dossier ${id_dossier}`
+            );
+            return res.status(201).json(result.rows[0]);
+        }
+
+        // Vérifications utilisateur et patient (comme avant)
+        const [userCheck, patientCheck] = await Promise.all([
+            query('SELECT * FROM utilisateur WHERE id_utilisateur = $1', [id_utilisateur]),
+            query('SELECT p.code_access FROM patient p JOIN dossier_medical_global d ON p.id_patient = d.id_patient WHERE d.id_dossier = $1', [id_dossier])
+        ]);
+
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Utilisateur non trouvé" });
+        }
+
+        if (patientCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Dossier medical non trouvé" });
+        }
+
+        const user = userCheck.rows[0];
+
+        // Vérification du mot de passe
+        const validPassword = await bcrypt.compare(password, user.mot_de_passe_hash);
+        if (!validPassword) {
+            return res.status(401).json({ success: false, message: 'Mot de passe incorrect' });
+        }
+
+        // Déchiffrement du code d'accès et de la clé privée (comme avant)
+        let decryptedCodeAccess;
+        try {
+            if (!user.code_access_dossier_hash) {
+                return res.status(400).json({ success: false, message: 'Code d\'accès non trouvé pour cet utilisateur' });
+            }
+            decryptedCodeAccess = CryptoJS.AES.decrypt(user.code_access_dossier_hash, password).toString(CryptoJS.enc.Utf8);
+            
+            if (!decryptedCodeAccess) {
+                return res.status(401).json({ success: false, message: 'Code d\'accès invalide' });
+            
+            }else{
+
+         await verifierAcces('0x492CEF1D0a586EA45c7c2bfCbF8404bBe595D9ba','0xd83f883Fd44B7577346cC11345ad475e25c68965');
+
+
+            }
+         
+        } catch (error) {
+            return res.status(400).json({ success: false, message: 'Erreur lors du déchiffrement du code d\'accès' });
+        }
+
+        await marquerPaiement(id_dossier);
+         await validerFormatFHIR(id_dossier, true);
+
+        // Déchiffrement de la clé privée (comme avant)
+        let decryptedPrivateKey;
+        try {
+            const encryptedData = user.cle_prive;
+            const [saltHex, ivHex, encryptedKey] = encryptedData.split(':');
+            const salt = Buffer.from(saltHex, 'hex');
+            const iv = Buffer.from(ivHex, 'hex');
+            const derivedKey = crypto.scryptSync(password, salt, 32);
+            const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
+            decryptedPrivateKey = decipher.update(encryptedKey, 'hex', 'utf8') + decipher.final('utf8');
+
+            if (!/^[0-9a-fA-F]+$/.test(decryptedPrivateKey)) {
+                return res.status(400).json({ success: false, message: 'Clé privée invalide après déchiffrement' });
+            }
+        } catch (error) {
+            return res.status(400).json({ success: false, message: 'Erreur lors du déchiffrement de la clé privée' });
+        }
+
+        // Traitement des fichiers (comme avant)
+        let parsedDetail = typeof detail === 'string' ? JSON.parse(detail) : detail;
+
+        const uploadDir = path.join(__dirname, '../../uploads/consultations');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        if (image) {
+            const imageFile = Array.isArray(image) ? image[0] : image;
+            const imageName = Date.now() + '_' + imageFile.name;
+            const imagePath = path.join(uploadDir, imageName);
+            await imageFile.mv(imagePath);
+            parsedDetail.imageRadiologie = `${req.protocol}://${req.get('host')}/uploads/consultations/${imageName}`;
+        }
+
+        if (pdfCarnet) {
+            const pdfFile = Array.isArray(pdfCarnet) ? pdfCarnet[0] : pdfCarnet;
+            const pdfName = Date.now() + '_' + pdfFile.name;
+            const pdfPath = path.join(uploadDir, pdfName);
+            await pdfFile.mv(pdfPath);
+            parsedDetail.pdfCarnet = `${req.protocol}://${req.get('host')}/uploads/consultations/${pdfName}`;
+        }
+
+        // Chiffrement des détails
+        const encryptedDetail = CryptoJS.AES.encrypt(JSON.stringify(parsedDetail), decryptedCodeAccess).toString();
+        const encryptedJsonData = {
+            encrypted_data: encryptedDetail
+        };
+
+        // Insertion en base de données
+        const result = await query(
+            'INSERT INTO consultation(id_dossier, id_utilisateur, date_consultation, detail) VALUES($1, $2, $3, $4) RETURNING *',
+            [id_dossier, id_utilisateur, new Date(), JSON.stringify(encryptedJsonData)]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(500).json({
+                success: false,
+                message: 'Échec de l\'insertion de la consultation'
+            });
+        }
+
+        // === PARTIE BLOCKCHAIN GANACHE AMÉLIORÉE ===
+        
+        // 1. Récupérer les comptes disponibles depuis Ganache
+        const accounts = await web3.eth.getAccounts();
+        console.log('Comptes disponibles:', accounts);
+        
+        // 2. Sélectionner un compte pour la transaction (premier compte ou selon votre logique)
+        const senderAccount = accounts[3]; // Ou utilisez une logique pour sélectionner le bon compte
+        console.log('Compte sélectionné:', senderAccount);
+        
+        // 3. Vérifier le solde du compte
+        const balance = await web3.eth.getBalance(senderAccount);
+        console.log('Solde du compte (ETH):', web3.utils.fromWei(balance, 'ether'));
+        
+        // 4. Préparer les données pour la blockchain
+        const blockChainData = {
+            type: 'Consultation',
+            date: new Date().toISOString(),
+            detail: 'Ajout d\'une nouvelle consultation médicale',
+            id_dossier: id_dossier,
+            id_utilisateur: id_utilisateur,
+            action: 'ajout_consultation',
+            consultation_id: result.rows[0].id_consultation,
+            docteur: `${user.nom} ${user.prenom}`,
+            hash_consultation: crypto.createHash('sha256').update(JSON.stringify(parsedDetail)).digest('hex')
+        };
+
+        // 5. Obtenir les paramètres réseau
+        const networkId = await web3.eth.net.getId();
+        const gasPrice = await web3.eth.getGasPrice();
+        const nonce = await web3.eth.getTransactionCount(senderAccount, 'pending');
+        
+        console.log('ID du réseau:', networkId);
+        console.log('Prix du gaz (Gwei):', web3.utils.fromWei(gasPrice, 'gwei'));
+        console.log('Nonce:', nonce);
+
+        // 6. Préparer la transaction
+        const transactionData = {
+            from: senderAccount,
+            to: senderAccount, // Transaction vers soi-même pour stocker les données
+            value: '0', // Pas de transfert d'ETH
+            data: '0x' + Buffer.from(JSON.stringify(blockChainData)).toString('hex'),
+            gas: 300000, // Limite de gaz
+            gasPrice: gasPrice,
+            nonce: nonce,
+            chainId: networkId
+        };
+
+        // 7. Envoyer la transaction
+        console.log('Envoi de la transaction...');
+        const receipt = await web3.eth.sendTransaction(transactionData);
+        
+        console.log('Transaction réussie!');
+        console.log('Hash de la transaction:', receipt.transactionHash);
+        console.log('Bloc:', receipt.blockNumber);
+        console.log('Gaz utilisé:', receipt.gasUsed);
+        await voterConsensus(receipt.blockNumber);
+        
+        // 8. Vérifier le nouveau solde
+        const newBalance = await web3.eth.getBalance(senderAccount);
+        const gasUsed = receipt.gasUsed;
+        const gasCost = (new BN(gasPrice)).mul(new BN(gasUsed));        
+        console.log('Nouveau solde (ETH):', web3.utils.fromWei(newBalance, 'ether'));
+        console.log('Coût du gaz (ETH):', web3.utils.fromWei(gasCost, 'ether'));
+
+        // 9. Signature cryptographique pour l'intégrité
+        const blockDataString = JSON.stringify(blockChainData);
+        const messageHash = crypto.createHash('sha256').update(blockDataString).digest();
+        const privateKey = ec.keyFromPrivate(decryptedPrivateKey, 'hex');
+        const signature = privateKey.sign(messageHash).toDER('hex');
+        
+        // Vérification de la signature
+        const publicKey = ec.keyFromPublic(user.cle_publique, 'hex');
+        const isVerified = publicKey.verify(messageHash, signature);
+        
+        if (!isVerified) {
+            return res.status(400).json({
+                success: false,
+                message: "Échec de la vérification de la signature"
+            });
+        }
+
+        // 10. Enregistrer dans votre système blockchain personnalisé
+      
+
+        // 11. Logs
+        try {
+            const resultLog = await addLogs({
+                id_dossier: id_dossier,
+                id_hopital: user.id_hopital,
+                id_utilisateur: id_utilisateur,
+                date_acces: new Date(),
+                type_action: 'insert',
+                operation_type: 'consultation',
+                dossier_username: user.nom,
+                target_type: 'consultation',
+                details: parsedDetail
+            });
+
+ 
+
+            return res.status(201).json({
+                success: true,
+                message: 'Consultation ajoutée avec succès',
+                data: {
+                    ...result.rows[0],
+                    detail: parsedDetail
+                },
+               
+                log: resultLog,
+                customBlockchain: blockchainResult
+            });
+        } catch (error) {
+            console.error("Erreur lors de l'ajout des logs:", error);
+            return res.status(500).json({
+                success: false,
+                message: "Erreur lors de l'enregistrement des logs",
+                error: error.message
+            });
+        }
+
+    } catch (error) {
+        console.error("Erreur:", error);
+        return res.status(500).json({
+            error: "Erreur serveur",
+            details: error.message
+        });
+    }
+};
 
 
 
@@ -106,119 +493,6 @@ const getAllDataTables = async (req, res) => {
     }
 };
 
-const registerUtilisateur = async (req, res) => {
-    const { nom, prenom, email, mot_de_passe, role, id_hopital, autre_donnees } = req.body;
-
-    try {
-        // Récupération de l'URL du nœud blockchain de l'hôpital
-        const getAllHopitals = await query(
-            "SELECT blockchain_node_url FROM hopital WHERE id_hopital = $1",
-            [id_hopital]
-        );
-
-        if (getAllHopitals.rows.length === 0) {
-            return res.status(404).json({ error: "Hôpital non trouvé" });
-        }
-
-        const blockchain_node_url = getAllHopitals.rows[0].blockchain_node_url;
-
-        // Hachage du mot de passe
-        const motDePasseHash = await bcrypt.hash(mot_de_passe, 10);
-
-        // Génération de la paire de clés ECDSA
-        const keyPair = ec.genKeyPair();
-        const publicKey = keyPair.getPublic("hex");
-        const privateKey = keyPair.getPrivate("hex");
-
-        // Chiffrement de la clé privée avec AES-256
-        const salt = crypto.randomBytes(16);
-        const iv = crypto.randomBytes(16);
-        const derivedKey = crypto.scryptSync(mot_de_passe, salt, 32); // Clé dérivée synchronement
-
-        const cipher = crypto.createCipheriv("aes-256-cbc", derivedKey, iv);
-        let encryptedPrivateKey = cipher.update(privateKey, "utf8", "hex");
-        encryptedPrivateKey += cipher.final("hex");
-
-        const encryptedData = `${salt.toString("hex")}:${iv.toString("hex")}:${encryptedPrivateKey}`;
-
-        // Insertion de l'utilisateur
-        const sql = `
-      INSERT INTO utilisateur (
-        nom, prenom, email, mot_de_passe_hash,
-        role, id_hopital, blockchain_node_url, autre_donnees,
-        cle_publique, cle_prive
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      RETURNING id_utilisateur, nom, email, role
-    `;
-
-        const { rows } = await query(sql, [
-            nom,
-            prenom,
-            email,
-            motDePasseHash,
-            role,
-            id_hopital,
-            blockchain_node_url,
-            autre_donnees || null,
-            publicKey,
-            encryptedData,
-        ]);
-
-        if (rows.length === 0) {
-            return res.status(500).json({ error: "Échec de l'insertion de l'utilisateur" });
-        }
-
-        const newUser = rows[0];
-
-        // Création du token JWT
-        const token = jwt.sign(
-            {
-                id_utilisateur: newUser.id_utilisateur,
-                email: newUser.email,
-                role: newUser.role,
-            },
-            process.env.TOKEN_KEY,
-            { expiresIn: "30d" }
-        );
-
-        // Sauvegarde du token dans la BDD
-        await query("UPDATE utilisateur SET token = $1 WHERE id_utilisateur = $2", [
-            token,
-            newUser.id_utilisateur,
-        ]);
-
-        // Réponse
-        res.status(201).json({
-            success: true,
-            message: "Utilisateur enregistré avec succès et clés blockchain générées",
-            utilisateur: {
-                ...newUser,
-                cle_publique: publicKey,
-            },
-            token,
-        });
-    } catch (error) {
-        console.error("Erreur lors de l'inscription:", error);
-
-        if (error.code === "42703") {
-            return res.status(500).json({
-                error: "Erreur de configuration de la base de données (colonne manquante)",
-                success: false,
-            });
-        } else if (error.code === "23505") {
-            return res.status(409).json({
-                error: "Email déjà utilisé",
-                success: false,
-            });
-        }
-
-        res.status(500).json({
-            error: "Erreur serveur",
-            details: error.message,
-            success: false,
-        });
-    }
-};
 
 const refreshToken = async (req, res) => {
     const { token, id_user } = req.body
@@ -1024,262 +1298,7 @@ function sanitizeBigInt(obj) {
     return obj;
   }
 
-const AjouterConsultation = async (req, res) => {
-    const { id_dossier, id_utilisateur, detail, password } = req.body;
-    const image = req.file;
-    const pdfCarnet = req.file;
 
-    if (!id_dossier || !id_utilisateur || !detail || !password) {
-        return res.status(400).json({ error: "Tous les champs sont requis" });
-    }
-
-    try {
-        // Gestion des rendez-vous (comme avant)
-        if (detail.date) {
-            const result = await query(
-                'UPDATE consultation SET rendezvous = $1 WHERE id_dossier = $2 AND id_utilisateur = $3',
-                [detail.rendezvous, id_dossier, id_utilisateur]
-            );
-            await envoyerNotificationUtilisateur(
-                id_utilisateur,
-                `Nouveau rendez-vous ajouté au dossier ${id_dossier}`
-            );
-            return res.status(201).json(result.rows[0]);
-        }
-
-        // Vérifications utilisateur et patient (comme avant)
-        const [userCheck, patientCheck] = await Promise.all([
-            query('SELECT * FROM utilisateur WHERE id_utilisateur = $1', [id_utilisateur]),
-            query('SELECT p.code_access FROM patient p JOIN dossier_medical_global d ON p.id_patient = d.id_patient WHERE d.id_dossier = $1', [id_dossier])
-        ]);
-
-        if (userCheck.rows.length === 0) {
-            return res.status(404).json({ error: "Utilisateur non trouvé" });
-        }
-
-        if (patientCheck.rows.length === 0) {
-            return res.status(404).json({ error: "Dossier medical non trouvé" });
-        }
-
-        const user = userCheck.rows[0];
-
-        // Vérification du mot de passe
-        const validPassword = await bcrypt.compare(password, user.mot_de_passe_hash);
-        if (!validPassword) {
-            return res.status(401).json({ success: false, message: 'Mot de passe incorrect' });
-        }
-
-        // Déchiffrement du code d'accès et de la clé privée (comme avant)
-        let decryptedCodeAccess;
-        try {
-            if (!user.code_access_dossier_hash) {
-                return res.status(400).json({ success: false, message: 'Code d\'accès non trouvé pour cet utilisateur' });
-            }
-            decryptedCodeAccess = CryptoJS.AES.decrypt(user.code_access_dossier_hash, password).toString(CryptoJS.enc.Utf8);
-            
-            if (!decryptedCodeAccess) {
-                return res.status(401).json({ success: false, message: 'Code d\'accès invalide' });
-            }
-        } catch (error) {
-            return res.status(400).json({ success: false, message: 'Erreur lors du déchiffrement du code d\'accès' });
-        }
-
-        // Déchiffrement de la clé privée (comme avant)
-        let decryptedPrivateKey;
-        try {
-            const encryptedData = user.cle_prive;
-            const [saltHex, ivHex, encryptedKey] = encryptedData.split(':');
-            const salt = Buffer.from(saltHex, 'hex');
-            const iv = Buffer.from(ivHex, 'hex');
-            const derivedKey = crypto.scryptSync(password, salt, 32);
-            const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, iv);
-            decryptedPrivateKey = decipher.update(encryptedKey, 'hex', 'utf8') + decipher.final('utf8');
-
-            if (!/^[0-9a-fA-F]+$/.test(decryptedPrivateKey)) {
-                return res.status(400).json({ success: false, message: 'Clé privée invalide après déchiffrement' });
-            }
-        } catch (error) {
-            return res.status(400).json({ success: false, message: 'Erreur lors du déchiffrement de la clé privée' });
-        }
-
-        // Traitement des fichiers (comme avant)
-        let parsedDetail = typeof detail === 'string' ? JSON.parse(detail) : detail;
-
-        const uploadDir = path.join(__dirname, '../../uploads/consultations');
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-
-        if (image) {
-            const imageFile = Array.isArray(image) ? image[0] : image;
-            const imageName = Date.now() + '_' + imageFile.name;
-            const imagePath = path.join(uploadDir, imageName);
-            await imageFile.mv(imagePath);
-            parsedDetail.imageRadiologie = `${req.protocol}://${req.get('host')}/uploads/consultations/${imageName}`;
-        }
-
-        if (pdfCarnet) {
-            const pdfFile = Array.isArray(pdfCarnet) ? pdfCarnet[0] : pdfCarnet;
-            const pdfName = Date.now() + '_' + pdfFile.name;
-            const pdfPath = path.join(uploadDir, pdfName);
-            await pdfFile.mv(pdfPath);
-            parsedDetail.pdfCarnet = `${req.protocol}://${req.get('host')}/uploads/consultations/${pdfName}`;
-        }
-
-        // Chiffrement des détails
-        const encryptedDetail = CryptoJS.AES.encrypt(JSON.stringify(parsedDetail), decryptedCodeAccess).toString();
-        const encryptedJsonData = {
-            encrypted_data: encryptedDetail
-        };
-
-        // Insertion en base de données
-        const result = await query(
-            'INSERT INTO consultation(id_dossier, id_utilisateur, date_consultation, detail) VALUES($1, $2, $3, $4) RETURNING *',
-            [id_dossier, id_utilisateur, new Date(), JSON.stringify(encryptedJsonData)]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(500).json({
-                success: false,
-                message: 'Échec de l\'insertion de la consultation'
-            });
-        }
-
-        // === PARTIE BLOCKCHAIN GANACHE AMÉLIORÉE ===
-        
-        // 1. Récupérer les comptes disponibles depuis Ganache
-        const accounts = await web3.eth.getAccounts();
-        console.log('Comptes disponibles:', accounts);
-        
-        // 2. Sélectionner un compte pour la transaction (premier compte ou selon votre logique)
-        const senderAccount = accounts[3]; // Ou utilisez une logique pour sélectionner le bon compte
-        console.log('Compte sélectionné:', senderAccount);
-        
-        // 3. Vérifier le solde du compte
-        const balance = await web3.eth.getBalance(senderAccount);
-        console.log('Solde du compte (ETH):', web3.utils.fromWei(balance, 'ether'));
-        
-        // 4. Préparer les données pour la blockchain
-        const blockChainData = {
-            type: 'Consultation',
-            date: new Date().toISOString(),
-            detail: 'Ajout d\'une nouvelle consultation médicale',
-            id_dossier: id_dossier,
-            id_utilisateur: id_utilisateur,
-            action: 'ajout_consultation',
-            consultation_id: result.rows[0].id_consultation,
-            docteur: `${user.nom} ${user.prenom}`,
-            hash_consultation: crypto.createHash('sha256').update(JSON.stringify(parsedDetail)).digest('hex')
-        };
-
-        // 5. Obtenir les paramètres réseau
-        const networkId = await web3.eth.net.getId();
-        const gasPrice = await web3.eth.getGasPrice();
-        const nonce = await web3.eth.getTransactionCount(senderAccount, 'pending');
-        
-        console.log('ID du réseau:', networkId);
-        console.log('Prix du gaz (Gwei):', web3.utils.fromWei(gasPrice, 'gwei'));
-        console.log('Nonce:', nonce);
-
-        // 6. Préparer la transaction
-        const transactionData = {
-            from: senderAccount,
-            to: senderAccount, // Transaction vers soi-même pour stocker les données
-            value: '0', // Pas de transfert d'ETH
-            data: '0x' + Buffer.from(JSON.stringify(blockChainData)).toString('hex'),
-            gas: 300000, // Limite de gaz
-            gasPrice: gasPrice,
-            nonce: nonce,
-            chainId: networkId
-        };
-
-        // 7. Envoyer la transaction
-        console.log('Envoi de la transaction...');
-        const receipt = await web3.eth.sendTransaction(transactionData);
-        
-        console.log('Transaction réussie!');
-        console.log('Hash de la transaction:', receipt.transactionHash);
-        console.log('Bloc:', receipt.blockNumber);
-        console.log('Gaz utilisé:', receipt.gasUsed);
-        
-        // 8. Vérifier le nouveau solde
-        const newBalance = await web3.eth.getBalance(senderAccount);
-        const gasUsed = receipt.gasUsed;
-        const gasCost = (new BN(gasPrice)).mul(new BN(gasUsed));        
-        console.log('Nouveau solde (ETH):', web3.utils.fromWei(newBalance, 'ether'));
-        console.log('Coût du gaz (ETH):', web3.utils.fromWei(gasCost, 'ether'));
-
-        // 9. Signature cryptographique pour l'intégrité
-        const blockDataString = JSON.stringify(blockChainData);
-        const messageHash = crypto.createHash('sha256').update(blockDataString).digest();
-        const privateKey = ec.keyFromPrivate(decryptedPrivateKey, 'hex');
-        const signature = privateKey.sign(messageHash).toDER('hex');
-        
-        // Vérification de la signature
-        const publicKey = ec.keyFromPublic(user.cle_publique, 'hex');
-        const isVerified = publicKey.verify(messageHash, signature);
-        
-        if (!isVerified) {
-            return res.status(400).json({
-                success: false,
-                message: "Échec de la vérification de la signature"
-            });
-        }
-
-        // 10. Enregistrer dans votre système blockchain personnalisé
-        const transaction = `Consultation ajoutée - Dossier: ${id_dossier} - ${new Date().toISOString()} par Dr ${user.nom} ${user.prenom}`;
-        const blockchainResult = await addrecordBlockchain(
-            blockChainData,
-            transaction,
-            signature,
-            user.cle_publique,
-            decryptedPrivateKey
-        );
-
-        // 11. Logs
-        try {
-            const resultLog = await addLogs({
-                id_dossier: id_dossier,
-                id_hopital: user.id_hopital,
-                id_utilisateur: id_utilisateur,
-                date_acces: new Date(),
-                type_action: 'insert',
-                operation_type: 'consultation',
-                dossier_username: user.nom,
-                target_type: 'consultation',
-                details: parsedDetail
-            });
-
- 
-
-            return res.status(201).json({
-                success: true,
-                message: 'Consultation ajoutée avec succès',
-                data: {
-                    ...result.rows[0],
-                    detail: parsedDetail
-                },
-               
-                log: resultLog,
-                customBlockchain: blockchainResult
-            });
-        } catch (error) {
-            console.error("Erreur lors de l'ajout des logs:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Erreur lors de l'enregistrement des logs",
-                error: error.message
-            });
-        }
-
-    } catch (error) {
-        console.error("Erreur:", error);
-        return res.status(500).json({
-            error: "Erreur serveur",
-            details: error.message
-        });
-    }
-};
 
 
 const AjouterDiagnostic = async (req, res) => {
